@@ -8,8 +8,8 @@ use lc3_ensemble::parse::parse_ast;
 use lc3_ensemble::sim::debug::Breakpoint;
 use lc3_ensemble::sim::frame::{Frame, ParameterList};
 use lc3_ensemble::sim::io::BufferedIO;
-use lc3_ensemble::sim::mem::{MemAccessCtx, Word, WordCreateStrategy};
-use lc3_ensemble::sim::{InterruptErr, SimErr, SimFlags, Simulator};
+use lc3_ensemble::sim::mem::{MachineInitStrategy, MemAccessCtx, Word};
+use lc3_ensemble::sim::{SimErr, SimFlags, Simulator};
 use pyo3::types::PyInt;
 use pyo3::{create_exception, prelude::*};
 use pyo3::exceptions::{PyIndexError, PyValueError};
@@ -227,7 +227,6 @@ impl PySimulator {
         // This allows the simulator to interrupt on a keyboard interrupt from the Python interface.
         this.sim.add_external_interrupt(|_| {
             Python::with_gil(|py| py.check_signals())
-                .map_err(InterruptErr::new)
         });
 
         this.reset();
@@ -247,15 +246,15 @@ impl PySimulator {
         let (strat, ret_value) = match fill {
             MemoryFillType::Random => {
                 let seed = value.unwrap_or_else(rand::random);
-                (WordCreateStrategy::Seeded { seed }, seed)
+                (MachineInitStrategy::Seeded { seed }, seed)
             },
             MemoryFillType::Single => {
                 let value = value.unwrap_or(0);
-                (WordCreateStrategy::Known { value: value as u16 }, value)
+                (MachineInitStrategy::Known { value: value as u16 }, value)
             },
         };
         
-        self.sim.flags.word_create_strat = strat;
+        self.sim.flags.machine_init = strat;
         self.reset();
         ret_value
     }
@@ -483,25 +482,31 @@ impl PySimulator {
     }
 
     /// Adds a breakpoint to the given location.
-    fn add_breakpoint(&mut self, break_loc: MemLocation) -> PyResult<u32> {
+    /// 
+    /// This returns whether the insertion was successful.
+    fn add_breakpoint(&mut self, break_loc: MemLocation) -> PyResult<bool> {
         let addr = self.resolve_location(break_loc)
             .map_err(|label| PyValueError::new_err(format!("cannot add a breakpoint at non-existent label {label:?}")))?;
             
 
         Ok(self.sim.breakpoints.insert(Breakpoint::PC(addr)))
     }
-    /// Removes a breakpoint with the given ID.
+    /// Removes a breakpoint at the given location.
     /// 
-    /// This returns whether the removal was successful (i.e., whether there is a breakpoint at the given ID).
-    fn remove_breakpoint(&mut self, break_id: u32) -> bool {
-        self.sim.breakpoints.remove(break_id).is_some()
+    /// This returns whether the removal was successful (i.e., whether there is a breakpoint at the given location).
+    fn remove_breakpoint(&mut self, break_loc: MemLocation) -> PyResult<bool> {
+        let addr = self.resolve_location(break_loc)
+        .map_err(|label| PyValueError::new_err(format!("cannot add a breakpoint at non-existent label {label:?}")))?;
+        
+
+        Ok(self.sim.breakpoints.insert(Breakpoint::PC(addr)))
     }
     
     /// Gets a list of currently defined breakpoints.
-    fn breakpoints(&self) -> std::collections::HashMap<u16, u32> {
+    fn breakpoints(&self) -> Vec<u16> {
         self.sim.breakpoints.iter()
-            .filter_map(|(k, bp)| match *bp {
-                Breakpoint::PC(addr) => Some((addr, k)),
+            .filter_map(|bpt| match *bpt {
+                Breakpoint::PC(addr) => Some(addr),
                 _ => None
             })
             .collect()
@@ -510,17 +515,17 @@ impl PySimulator {
     /// The n condition code.
     #[getter]
     fn get_n(&self) -> bool {
-        self.sim.psr().cc() & 0b100 != 0
+        self.sim.psr().is_n()
     }
     /// The z condition code.
     #[getter]
     fn get_z(&self) -> bool {
-        self.sim.psr().cc() & 0b010 != 0
+        self.sim.psr().is_z()
     }
     /// The p condition code.
     #[getter]
     fn get_p(&self) -> bool {
-        self.sim.psr().cc() & 0b001 != 0
+        self.sim.psr().is_p()
     }
 
     /// The program counter.
