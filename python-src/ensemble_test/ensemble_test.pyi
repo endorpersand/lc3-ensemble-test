@@ -124,7 +124,9 @@ class Simulator:
     @property
     def frame_number(self) -> int: pass
     @property
-    def frames(self) -> list[Frame]: pass
+    def frames(self) -> list[Frame] | None: pass
+    @property
+    def last_frame(self) -> Frame | None: pass
 
     def get_subroutine_def(self, loc: int | str) -> SubroutineDef | None: pass
     def set_subroutine_def(self, loc: int | str, defn: SubroutineDef) -> None: pass

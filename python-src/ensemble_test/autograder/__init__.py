@@ -1,6 +1,7 @@
 """
 Test case utility.
 """
+from collections.abc import Iterable
 import dataclasses
 import enum
 import itertools
@@ -47,6 +48,10 @@ class LC3UnitTestCase(unittest.TestCase):
         ctr = itertools.count() if length is None else range(length)
         return (self.sim.read_mem(_to_u16(start_addr + i)) for i in ctr)
     
+    def _writeContiguous(self, start_addr: int, words: Iterable[int]):
+        for i, word in enumerate(words):
+            self.sim.write_mem(start_addr + i, _to_u16(word))
+
     def _lookup(self, label: str) -> int:
         addr = self.sim.lookup(label)
         if addr is None:
@@ -62,7 +67,7 @@ class LC3UnitTestCase(unittest.TestCase):
         )
         
     def _print_stack_frame(self):
-        stack = self.sim.frames
+        stack = self.sim.frames or []
         for i, frame in enumerate(stack):
             name = self.sim.reverse_lookup(frame.callee_addr) or f"x{frame.callee_addr:04X}"
             defn = self.sim.get_subroutine_def(frame.callee_addr)
@@ -113,16 +118,13 @@ class LC3UnitTestCase(unittest.TestCase):
     
     def writeArray(self, label: str, lst: list[int]):
         addr = self._lookup(label)
-        
-        for i, e in enumerate(lst):
-            self.sim.write_mem(addr + i, _to_u16(e))
+        self._writeContiguous(addr, lst)
 
     def writeString(self, label: str, string: str):
         addr = self._lookup(label)
         string_bytes = _require_ascii_string(string, arg_desc=f"string value parameter ({string=!r})")
 
-        for i, byte in enumerate(string_bytes):
-            self.sim.write_mem(addr + i, _to_u16(byte))
+        self._writeContiguous(addr, string_bytes)
         self.sim.write_mem(addr + len(string_bytes), 0)
 
     def setInput(self, inp: str):
@@ -264,7 +266,8 @@ class LC3UnitTestCase(unittest.TestCase):
 
         if defn is None:
             raise ValueError(f"No definition provided for subroutine {label.upper()!r}. Provide one with self.defineSubroutine.")
-        # Write arguments in:
+        
+        # Handle all arguments
         elif defn[0] == core.SubroutineType.CallingConvention:
             params = defn[1]
             if len(params) != len(args):
@@ -272,10 +275,9 @@ class LC3UnitTestCase(unittest.TestCase):
                     f"Number of arguments provided ({len(args)}) does not match "
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
-            
+            # Write arguments to stack
             self.sim.r6 -= len(args)
-            for i, arg in enumerate(args):
-                self.sim.write_mem(self.sim.r6 + i, _to_u16(arg))
+            self._writeContiguous(self.sim.r6, args)
         elif defn[0] == core.SubroutineType.PassByRegister:
             params = defn[1]
             if len(params) != len(args):
@@ -283,7 +285,7 @@ class LC3UnitTestCase(unittest.TestCase):
                     f"Number of arguments provided ({len(args)}) does not match "
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
-            
+            # Write arguments to each register
             for (_, reg_no), arg in zip(params, args):
                 self.sim.set_reg(reg_no, _to_u16(arg))
         else:
@@ -301,7 +303,14 @@ class LC3UnitTestCase(unittest.TestCase):
             self.sim._run_until_frame_change()
 
             if self.sim.frame_number > last_frame_no:
-                node = CallNode(frame_no=self.sim.frame_number, callee=self.sim.pc, args=[d for d, _ in self.sim.frames[-1].arguments])
+                last_frame = self.sim.last_frame
+                if last_frame is None: raise ValueError("cannot compute CallNode without debug_frames")
+                
+                node = CallNode(
+                    frame_no=self.sim.frame_number, 
+                    callee=last_frame.callee_addr, 
+                    args=[d for d, _ in last_frame.arguments]
+                )
                 path.append(node)
                 curr_path.append(node)
             

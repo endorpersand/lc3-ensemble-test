@@ -658,6 +658,15 @@ impl PySimulator {
         Some(frames)
     }
 
+    /// Gets the last frame of the frame stack.
+    #[getter]
+    fn get_last_frame(&self) -> Option<PyFrame> {
+        self.sim.frame_stack.frames()?
+            .last()
+            .cloned()
+            .map(PyFrame)
+    }
+
     /// Returns true if last execution hit HALT.
     fn hit_halt(&self) -> bool {
         self.sim.hit_halt()
