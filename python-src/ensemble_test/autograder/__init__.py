@@ -30,10 +30,16 @@ class InternalError(Exception):
 
 def _verify_ascii_string(string: str, *, arg_desc: str | None = None) -> bytes:
     try:
-        return string.encode("ascii")
+        bstring = string.encode("ascii")
     except UnicodeEncodeError:
         arg_desc = arg_desc or f"string parameter ({string=!r})"
         raise InternalError(f"{arg_desc} should be an ASCII string")
+
+    if any(b == 0 for b in bstring):
+        raise InternalError(f"{arg_desc} contains a null terminator")
+
+    return bstring
+
 def _verify_reg_no(reg_no: int):
     if not (0 <= reg_no <= 7):
         raise InternalError(f"cannot access non-existent register {reg_no}")
@@ -173,44 +179,39 @@ class LC3UnitTestCase(unittest.TestCase):
         expected = [*expected_bytes, 0]
         actual = list(self._readContiguous(addr, len(expected)))
         
-        try:
-            nul_pos = actual.index(0)
-        except ValueError:
-            nul_pos = -1
-        
-        # if nul_pos is -1, this gets everything except the last byte. we print the actual_str as "XYZ...", so this is what we want
-        # if nul_pos is not -1, this gets everything right before the null-terminator, which is what we want
-        for e in actual[:nul_pos]:
-            self.assertTrue(0 <= e <= 127, f"Found invalid ASCII byte in string at label {label.upper()}: {actual}")
-        actual_str = bytes(actual[:nul_pos]).decode("ascii")
-
-        for e, a in zip(expected, actual):
-            if e == 0 and a == 0:
-                break
-
-            if e != 0 and a == 0:
+        # Verify all (except last) elements are ASCII-compatible and not a null-terminator
+        for i, ch in enumerate(actual[:-1]):
+            if ch == 0:
+                actual_str = bytes(actual[:i]).decode("ascii") # ok because we checked beforehand
                 self.fail(
                     self._simpleAssertMsg(f"String at {label.upper()} shorter than expected",
                         f"{expected_str} {expected}",
                         f"{actual_str.ljust(len(expected_str))} {actual}")
                 )
+            elif not (0 <= ch <= 127):
+                fail_array = f"[{', '.join(map(str, actual[:i + 1]))}, ...]"
+                self.fail(f"Found invalid ASCII byte in string at label {label.upper()}: {fail_array}")
 
-            if e == 0 and a != 0:
-                self.fail(
-                    self._simpleAssertMsg(f"String at {label.upper()} longer than expected", 
-                        f"{expected_str}    {expected}", 
-                        f"{actual_str}... {actual}")
-                )
-            
-            if e != 0 and a != 0:
-                pad = max(len(expected_str), len(actual_str))
+        # ok because we checked beforehand
+        # the actual string doesn't include the last element, so we omit it in any following print statements
+        actual_str = bytes(actual[:-1]).decode("ascii")
 
-                self.assertEqual(e, a,
-                    self._simpleAssertMsg(f"String at label {label.upper()} did not match expected", 
-                        f"{expected_str.ljust(pad)} {expected}", 
-                        f"{actual_str.ljust(pad)} {actual}"
-                    )
+        # Verify last element is the null-terminator
+        if actual[-1] != 0:
+            self.fail(
+                self._simpleAssertMsg(f"String at {label.upper()} longer than expected", 
+                    f"{expected_str}    {expected}", 
+                    f"{actual_str}... {actual}")
+            )
+        
+        # Check for mismatches
+        for e, a in zip(expected, actual):
+            self.assertEqual(e, a,
+                self._simpleAssertMsg(f"String at label {label.upper()} did not match expected", 
+                    f"{expected_str} {expected}", 
+                    f"{actual_str} {actual}"
                 )
+            )
     
     def assertConsoleOutput(self, expected: str):
         # There's technically nothing wrong with non-ASCII inputs for this method,
