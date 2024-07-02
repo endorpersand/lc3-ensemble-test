@@ -23,12 +23,20 @@ def _to_u16(val: int) -> int:
 def _to_i16(val: int) -> int:
     val = _to_u16(val)
     return val - (val >> 15) * 65536
-def _require_ascii_string(string: str, *, arg_desc: str | None = None) -> bytes:
+
+class InternalError(Exception):
+    def __str__(self):
+        return f"{super().__str__()}\n[This error should not occur. If you see this on Gradescope, contact a TA.]"
+
+def _verify_ascii_string(string: str, *, arg_desc: str | None = None) -> bytes:
     try:
         return string.encode("ascii")
     except UnicodeEncodeError:
         arg_desc = arg_desc or f"string parameter ({string=!r})"
-        raise ValueError(f"{arg_desc} should be an ASCII string")
+        raise InternalError(f"{arg_desc} should be an ASCII string")
+def _verify_reg_no(reg_no: int):
+    if not (0 <= reg_no <= 7):
+        raise InternalError(f"cannot access non-existent register {reg_no}")
 
 @dataclasses.dataclass
 class CallNode:
@@ -55,7 +63,7 @@ class LC3UnitTestCase(unittest.TestCase):
     def _lookup(self, label: str) -> int:
         addr = self.sim.lookup(label)
         if addr is None:
-            raise ValueError(f"Label {label.upper()} is missing in the assembly code")
+            raise InternalError(f"Label {label.upper()} is missing in the assembly code")
 
         return addr
     
@@ -66,7 +74,7 @@ class LC3UnitTestCase(unittest.TestCase):
             f"actual:   {actual}"
         )
         
-    def _print_stack_frame(self):
+    def _printStackFrame(self):
         stack = self.sim.frames or []
         for i, frame in enumerate(stack):
             name = self.sim.reverse_lookup(frame.callee_addr) or f"x{frame.callee_addr:04X}"
@@ -122,16 +130,21 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def writeString(self, label: str, string: str):
         addr = self._lookup(label)
-        string_bytes = _require_ascii_string(string, arg_desc=f"string value parameter ({string=!r})")
+        string_bytes = _verify_ascii_string(string, arg_desc=f"string value parameter ({string=!r})")
 
         self._writeContiguous(addr, string_bytes)
         self.sim.write_mem(addr + len(string_bytes), 0)
 
+    def setReg(self, reg_no: int, value: int):
+        _verify_reg_no(reg_no)
+        self.sim.set_reg(reg_no, _to_u16(value))
+
     def setInput(self, inp: str):
-        _require_ascii_string(inp, arg_desc=f"input parameter ({inp=!r})")
+        _verify_ascii_string(inp, arg_desc=f"input parameter ({inp=!r})")
         self.sim.input = inp
 
     def assertReg(self, reg_no: int, expected: int):
+        _verify_reg_no(reg_no)
         actual = self.sim.get_reg(reg_no)
 
         self._assertShortEqual(expected, actual, 
@@ -155,7 +168,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def assertString(self, label: str, expected_str: str):
         addr = self._lookup(label)
-        expected_bytes = _require_ascii_string(expected_str, arg_desc=f"expected string parameter ({expected_str=!r})")
+        expected_bytes = _verify_ascii_string(expected_str, arg_desc=f"expected string parameter ({expected_str=!r})")
         
         expected = [*expected_bytes, 0]
         actual = list(self._readContiguous(addr, len(expected)))
@@ -205,7 +218,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
         # But just for consistency and too-lazy-to-verify-correctness,
         # we'll just require it's ASCII
-        _require_ascii_string(expected, arg_desc=f"expected string parameter ({expected=!r})")
+        _verify_ascii_string(expected, arg_desc=f"expected string parameter ({expected=!r})")
         actual = self.sim.output
         self.assertEqual(expected, actual,
                          self._simpleAssertMsg("Console output did not match expected", expected, actual))
@@ -216,7 +229,7 @@ class LC3UnitTestCase(unittest.TestCase):
                                   signed = False)
     
     def assertCondCode(self, expected: typing.Literal["n", "z", "p"]):
-        if expected not in ('n', 'z', 'p'): raise ValueError(f"expected parameter should be 'n', 'z', or 'p' ({expected=!r})")
+        if expected not in ('n', 'z', 'p'): raise InternalError(f"expected parameter should be 'n', 'z', or 'p' ({expected=!r})")
         n, z, p = self.sim.n, self.sim.z, self.sim.p
 
         if n + z + p < 1:
@@ -265,13 +278,16 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.r6 = R6
 
         if defn is None:
-            raise ValueError(f"No definition provided for subroutine {label.upper()!r}. Provide one with self.defineSubroutine.")
+            raise InternalError(
+                f"No definition provided for subroutine {label.upper()!r}."
+                "Provide one with self.defineSubroutine."
+            )
         
         # Handle all arguments
         elif defn[0] == core.SubroutineType.CallingConvention:
             params = defn[1]
             if len(params) != len(args):
-                raise ValueError(
+                raise InternalError(
                     f"Number of arguments provided ({len(args)}) does not match "
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
@@ -281,7 +297,7 @@ class LC3UnitTestCase(unittest.TestCase):
         elif defn[0] == core.SubroutineType.PassByRegister:
             params = defn[1]
             if len(params) != len(args):
-                raise ValueError(
+                raise InternalError(
                     f"Number of arguments provided ({len(args)}) does not match "
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
@@ -304,7 +320,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
             if self.sim.frame_number > last_frame_no:
                 last_frame = self.sim.last_frame
-                if last_frame is None: raise ValueError("cannot compute CallNode without debug_frames")
+                if last_frame is None: raise InternalError("cannot compute CallNode without debug_frames")
                 
                 node = CallNode(
                     frame_no=self.sim.frame_number, 
@@ -330,10 +346,10 @@ class LC3UnitTestCase(unittest.TestCase):
         if regs is None:
             regs = [0, 1, 2, 3, 4, 5, 7]
         elif not all(0 <= r < 8 for r in regs):
-                raise ValueError("regs argument has to consist of register numbers (which are between 0 and 7 inclusive)")
+                raise InternalError("regs argument has to consist of register numbers (which are between 0 and 7 inclusive)")
     
         if self.saved_registers is None:
-            raise ValueError("cannot call assertRegsPreserved before an execution method (e.g., runCode or callSubroutine)")
+            raise InternalError("cannot call assertRegsPreserved before an execution method (e.g., runCode or callSubroutine)")
         
         for r in regs:
             self._assertShortEqual(
