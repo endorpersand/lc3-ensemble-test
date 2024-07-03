@@ -97,7 +97,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 elif defn[0] == core.SubroutineType.PassByRegister:
                     args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn[1], frame.arguments))
                 else:
-                    raise NotImplementedError(f"_print_stack_frame: unimplemented subroutine type {defn[0]}")
+                    raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {defn[0]}")
             else:
                 args = "?"
             print(f"{' ' * (i * 2)}{name}({args}): fp={fp_str}, r7={r7_str}")
@@ -256,7 +256,7 @@ class LC3UnitTestCase(unittest.TestCase):
         
         self.sim.set_subroutine_def(loc, defn)
     
-    def _get_return_value(self, callee: int) -> int | None:
+    def _getReturnValue(self, callee: int) -> int | None:
         defn = self.sim.get_subroutine_def(callee)
 
         if defn is not None:
@@ -266,7 +266,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 _, _, ret_reg = defn
                 ret = self.sim.get_reg(ret_reg) if ret_reg is not None else None
             else:
-                raise NotImplementedError(f"_get_return_value: unimplemented subroutine type {defn[0]}")
+                raise NotImplementedError(f"_getReturnValue: unimplemented subroutine type {defn[0]}")
             
             return ret
 
@@ -333,8 +333,8 @@ class LC3UnitTestCase(unittest.TestCase):
             
             if self.sim.frame_number < last_frame_no:
                 node = curr_path.pop()
-                node.ret = self._get_return_value(node.callee)
-        path[0].ret = self._get_return_value(path[0].callee)
+                node.ret = self._getReturnValue(node.callee)
+        path[0].ret = self._getReturnValue(path[0].callee)
 
         if self.sim.hit_halt():
             self.fail(f"Program halted before completing execution of subroutine {label!r}")
