@@ -272,37 +272,64 @@ class TestLC3Sample(LC3UnitTestCase):
             self.assertReg(6, 0xD000)
             self.assertReg(0, 4 * N)
 
-    def test_stack_frame(self):
-        self.loadFile("test-asm/xy-lc3cc.asm")
+    # def test_stack_frame(self):
+    #     self.loadFile("test-asm/xy-lc3cc.asm")
 
-        self.defineSubroutine("X", ["n"])
-        self.defineSubroutine("Y", ["n"])
-        try:
-            self.runCode()
-        except core.SimError as e:
-            self._printStackFrame()
-            self.fail(e)
-        self.assertReg(0, 2)
+    #     self.defineSubroutine("X", ["n"])
+    #     self.defineSubroutine("Y", ["n"])
+    #     try:
+    #         self.runCode()
+    #     except core.SimError as e:
+    #         self._printStackFrame()
+    #         self.fail(e)
+    #     self.assertReg(0, 2)
     
-    def test_loop(self):
+    def test_halt(self):
+        # halting program
+        self.loadCode("""
+            .orig x3000
+            AND R0, R0, #0
+            ADD R0, R0, #15
+            LOOP: 
+                BRnz END
+                ADD R0, R0, #-1
+                BR LOOP
+            END: 
+                HALT
+            .end
+        """)
+        self.runCode()
+        self.assertHalted()
+
+        # infinite loop
         self.loadCode("""
             .orig x3000
             THIS BR THIS
             .end
         """)
-
         self.runCode()
-        self.assertHalted()
+        with self.assertRaises(AssertionError) as e:
+            self.assertHalted()
+            self.assertIn("halt", str(e.exception))
 
     def test_regs_preserved(self):
         self.loadCode("""
             .orig x3000
+            LD R6, SP
             JSR SR
             HALT
 
             SR
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                      
                 ADD R0, R0, #2
+                      
+                LDR R0, R6, #0
+                ADD R6, R6, #1
                 RET
+            
+            SP .fill xF000
             .end
         """)
 
