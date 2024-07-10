@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use lc3_ensemble::asm::{assemble_debug, ObjectFile};
@@ -263,7 +264,7 @@ impl PySimulator {
     /// and loads the resulting object file into the simulator.
     /// 
     /// This can raise a [`LoadError`] if assembling fails.
-    fn load_file(&mut self, src_fp: &str) -> PyResult<()> {
+    fn load_file(&mut self, src_fp: PathBuf) -> PyResult<()> {
         let src = std::fs::read_to_string(src_fp)?;
         self.load_code(&src)
     }

@@ -5,6 +5,7 @@ from collections.abc import Iterable
 import dataclasses
 import enum
 import itertools
+from pathlib import Path
 import typing
 from .. import core
 import unittest
@@ -54,9 +55,18 @@ class CallNode:
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
         self.sim = core.Simulator()
-        self.seed = self.sim.init(core.MemoryFillType.Random)
         self.saved_registers: list[int] | None = None
-        self.longMessage = False
+
+        # Preconditions
+        self.init_fill = core.MemoryFillType.Random
+        self.init_seed = self.sim.init(self.init_fill)
+        self.source_code: Path | str | None = None
+        """
+        Where the source comes from.
+        If this is a path, it comes from some local file.
+        If this is a string, it comes from inline code.
+        If this is None, it has not yet been declared.
+        """
     
     def _readContiguous(self, start_addr: int, length: int | None = None):
         ctr = itertools.count() if length is None else range(length)
@@ -116,13 +126,29 @@ class LC3UnitTestCase(unittest.TestCase):
 
         self.assertEqual(expected_u, actual_u, msg)
     
+    def fillMachine(self, fill: core.MemoryFillType, value: int | None = None):
+        if not isinstance(fill, core.MemoryFillType):
+            raise InternalError(f"fillMachine argument 'fill' was expected to be {type(core.MemoryFillType)}, but was {type(fill)}")
+        if isinstance(value, int) and not (0 <= value < 2 ** 64):
+            raise InternalError(f"fillMachine argument 'value' must be an unsigned 64-bit integer")
+
+        self.init_fill = fill
+        self.init_seed = self.sim.init(fill, value)
+
     def loadFile(self, fp: str):
-        self.sim.load_file(fp)
+        self.source_code = Path(fp)
+        self.sim.load_file(self.source_code)
     
     def loadCode(self, src: str):
+        self.source_code = src
         self.sim.load_code(src)
 
+    def _verify_ready_to_exec(self):
+        if self.source_code is None:
+            raise InternalError("cannot execute, no code was loaded")
+
     def runCode(self, max_instrs_run=INSTRUCTION_RUN_LIMIT):
+        self._verify_ready_to_exec()
         self._saveRegisters()
         self.sim.run(max_instrs_run)
 
@@ -271,21 +297,22 @@ class LC3UnitTestCase(unittest.TestCase):
             return ret
 
     def callSubroutine(self, label: str, args: list[int]) -> list[CallNode]:
+        self._verify_ready_to_exec()
+
         R5, R6, R7 = 0x5555, 0x6666, 0x7777
+        
         addr = self._lookup(label)
         defn = self.sim.get_subroutine_def(addr)
-
-        self.sim.r5 = R5
-        self.sim.r6 = R6
-
         if defn is None:
             raise InternalError(
                 f"No definition provided for subroutine {label.upper()!r}."
                 "Provide one with self.defineSubroutine."
             )
-        
+
+        self.sim.r5 = R5
+        self.sim.r6 = R6
         # Handle all arguments
-        elif defn[0] == core.SubroutineType.CallingConvention:
+        if defn[0] == core.SubroutineType.CallingConvention:
             params = defn[1]
             if len(params) != len(args):
                 raise InternalError(

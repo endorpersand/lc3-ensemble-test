@@ -9,6 +9,7 @@
 # from the IDE.
 
 import enum
+import os
 from typing import Literal, TypeAlias
 
 
@@ -19,7 +20,7 @@ class Simulator:
     def init(self, fill: MemoryFillType, value: int | None = None) -> int: pass
 
     # Loading simulator code
-    def load_file(self, src_fp: str) -> None: pass
+    def load_file(self, src_fp: os.PathLike | str) -> None: pass
     def load_code(self, src: str) -> None: pass
 
     # Simulation
