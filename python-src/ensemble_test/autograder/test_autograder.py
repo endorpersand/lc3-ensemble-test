@@ -1,7 +1,7 @@
 import unittest
 
 from ensemble_test import core
-from . import InternalError, LC3UnitTestCase, CallNode
+from . import InternalArgError, LC3UnitTestCase, CallNode
 
 class TestLC3Sample(LC3UnitTestCase):
     def test_reg(self):
@@ -37,7 +37,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.assertMemValue("four",  0x4444)
         
         # doesn't exist
-        with self.assertRaises(InternalError):
+        with self.assertRaises(ValueError):
             self.assertMemValue("five", 0x5555)
     
     def test_array(self):
@@ -80,7 +80,7 @@ class TestLC3Sample(LC3UnitTestCase):
             .end
         """)
         # non-ascii string test
-        with self.assertRaises(InternalError) as e:
+        with self.assertRaises(InternalArgError) as e:
             self.assertString("BAD_STRINGY", "\U0001F614")
 
         # non-byte
@@ -132,7 +132,7 @@ class TestLC3Sample(LC3UnitTestCase):
         """)
         self.runCode()
         self.assertHalted()
-        self.assertConsoleOutput(''.join([chr(i) for i in range(32, 127)]))
+        self.assertOutput(''.join([chr(i) for i in range(32, 127)]))
 
     def test_pc(self):
         self.loadCode("""
@@ -159,7 +159,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.runCode()
 
         # cc failure
-        with self.assertRaises(InternalError):
+        with self.assertRaises(InternalArgError):
             self.assertCondCode("q") # type: ignore
         
         # cc success
@@ -170,7 +170,7 @@ class TestLC3Sample(LC3UnitTestCase):
         
 
         # assert callSubroutine errors if no defined SR
-        with self.assertRaises(InternalError) as e:
+        with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15])
             self.assertIn("No definition provided", str(e.exception))
 
@@ -178,7 +178,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.defineSubroutine("SUMTORIAL", ["n"])
 
         # assert callSubroutine errors if wrong number of arguments
-        with self.assertRaises(InternalError) as e:
+        with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
             self.assertIn("Number of arguments provided", str(e.exception))
 
@@ -213,7 +213,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.defineSubroutine("SUMTORIAL", {0: "n"}, ret=0)
 
         # assert callSubroutine errors if wrong number of arguments
-        with self.assertRaises(InternalError) as e:
+        with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
             self.assertIn("Number of arguments provided", str(e.exception))
 
