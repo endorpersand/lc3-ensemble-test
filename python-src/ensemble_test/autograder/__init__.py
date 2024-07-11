@@ -457,6 +457,8 @@ class LC3UnitTestCase(unittest.TestCase):
             raise NotImplementedError(f"callSubroutine: unimplemented subroutine type {defn[0]}")
         
         self.sim.pc = R7
+        self.sim.write_mem(R7, self.sim.read_mem(R7)) # initialize this mem loc so that it doesn't crash when calling in strict mode
+
         self._saveRegisters()
         self.sim.call_subroutine(addr)
         
@@ -486,6 +488,10 @@ class LC3UnitTestCase(unittest.TestCase):
 
         if self.sim.hit_halt():
             self.fail(f"Program halted before completing execution of subroutine {label!r}")
+
+        if defn[0] == core.SubroutineType.CallingConvention:
+            # Restore stack to state before subroutine call
+            self.sim.r6 += len(args) + 1
 
         # TODO: better interface than list[CallNode]
         return path

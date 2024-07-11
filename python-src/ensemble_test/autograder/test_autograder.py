@@ -323,6 +323,7 @@ class TestLC3Sample(LC3UnitTestCase):
                 ADD R6, R6, #-1
                 STR R0, R6, #0
                       
+                AND R0, R0, #0
                 ADD R0, R0, #2
                       
                 LDR R0, R6, #0
