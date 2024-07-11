@@ -3,6 +3,54 @@ import unittest
 from ensemble_test import core
 from . import InternalArgError, LC3UnitTestCase, CallNode
 
+def _subroutine(name: str, inner: str):
+    return f"""
+    {name}:
+        ADD R6, R6, #-1
+        ;; push R7
+        ADD R6, R6, #-1
+        STR R7, R6, #0
+        ;; push R5
+        ADD R6, R6, #-1
+        STR R5, R6, #0
+        ;; set R5 to FP
+        ADD R5, R6, #1
+        ;; push R0-R4
+        ADD R6, R6, #-1
+        STR R0, R6, #0
+        ADD R6, R6, #-1
+        STR R1, R6, #0
+        ADD R6, R6, #-1
+        STR R2, R6, #0
+        ADD R6, R6, #-1
+        STR R3, R6, #0
+        ADD R6, R6, #-1
+        STR R4, R6, #0
+
+        {inner}
+        
+        ;; pop R0-R4
+        LDR R4, R6, #0
+        ADD R6, R6, #1
+        LDR R3, R6, #0
+        ADD R6, R6, #1
+        LDR R2, R6, #0
+        ADD R6, R6, #1
+        LDR R1, R6, #0
+        ADD R6, R6, #1
+        LDR R0, R6, #0
+        ADD R6, R6, #1
+        ;; pop local variables
+        ADD R6, R5, #-1
+        ;; pop R5
+        LDR R5, R6, #0
+        ADD R6, R6, #1
+        ;; pop R7
+        LDR R7, R6, #0
+        ADD R6, R6, #1
+        RET
+    """
+
 class TestLC3Sample(LC3UnitTestCase):
     def test_reg(self):
         self.loadCode("""
@@ -336,6 +384,115 @@ class TestLC3Sample(LC3UnitTestCase):
 
         self.runCode()
         self.assertRegsPreserved([0, 1, 2, 3, 4, 5])
+
+        self.loadCode(f"""
+            .orig x3000
+                {_subroutine("SR", '''
+                    AND R0, R0, #0
+                    ADD R0, R0, #0
+                ''')}
+            .end
+        """)
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+        self.assertRegsPreserved([0, 1, 2, 3, 4, 5])
+
+    def test_stack_correct(self):
+        self.loadCode(f"""
+            .orig x3000
+            {_subroutine("SR", '''
+                AND R0, R0, #0
+            ''')}
+            .end
+        """)
+
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+
+        self.assertStackCorrect()
+
+    def test_exec_asserts(self):
+        self.loadCode(f"""
+            .orig x3000
+                {_subroutine("SR", "")}
+            .end
+        """)
+
+        ## NO EXECUTION CALLS
+        with self.assertRaises(InternalArgError):
+            self.assertRegsPreserved()
+        with self.assertRaises(InternalArgError):
+            self.assertHalted()
+        with self.assertRaises(InternalArgError):
+            self.assertReturned()
+        with self.assertRaises(InternalArgError):
+            self.assertStackCorrect()
+        
+        ## CALL SUBROUTINE
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+
+        self.assertRegsPreserved([0, 1, 2, 3, 4, 5])
+        with self.assertRaises(InternalArgError):
+            self.assertHalted()
+        self.assertReturned()
+        self.assertStackCorrect()
+
+        ## RUN CODE
+        self.loadCode("""
+            .orig x3000
+                HALT
+            .end
+        """)
+        self.runCode()
+
+        self.assertRegsPreserved([0, 1, 2, 3, 4, 5, 6, 7])
+        self.assertHalted()
+        with self.assertRaises(InternalArgError):
+            self.assertReturned()
+        with self.assertRaises(InternalArgError):
+            self.assertStackCorrect()
+
+    def test_exec_asserts_fail(self):
+        ## CALL SUBROUTINE
+        self.loadCode(f"""
+            .orig x3000
+                SR: 
+                    AND R0, R0, #0
+                    RET
+            .end
+        """)
+        
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+
+        with self.assertRaises(AssertionError) as e:
+            self.assertRegsPreserved([0, 1, 2, 3, 4, 5])
+            self.assertIn("register 0", str(e.msg))
+        
+        self.loadCode(f"""
+            .orig x3000
+                SR: BR SR
+            .end
+        """)
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+        with self.assertRaises(AssertionError):
+            self.assertReturned()
+        with self.assertRaises(AssertionError):
+            self.assertStackCorrect()
+
+        ## RUN CODE
+        self.loadCode("""
+            .orig x3000
+                LOOP: BR LOOP
+            .end
+        """)
+        self.runCode()
+
+        self.assertRegsPreserved([0, 1, 2, 3, 4, 5, 6, 7])
+        with self.assertRaises(AssertionError):
+            self.assertHalted()
 
 if __name__ == "__main__":
     unittest.main()

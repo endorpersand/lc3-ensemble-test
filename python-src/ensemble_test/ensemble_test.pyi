@@ -28,7 +28,7 @@ class Simulator:
     def step_in(self) -> None: pass
     def step_out(self) -> None: pass
     def step_over(self) -> None: pass
-    def _run_until_frame_change(self) -> None: pass
+    def _run_until_frame_change(self, stop: int | None = None) -> None: pass
 
     # Memory access
     def read_mem(self, addr: int, *, privileged: bool = True, strict: bool = False) -> int: pass
@@ -170,8 +170,8 @@ class Frame:
     def arguments(self) -> list[tuple[int, bool]]: pass
     pass
 class SubroutineType(enum.Enum):
-    CallingConvention: SubroutineType
-    PassByRegister: SubroutineType
+    CallingConvention = enum.auto()
+    PassByRegister = enum.auto()
 
 SubroutineDef: TypeAlias = (
     tuple[Literal[SubroutineType.CallingConvention], list[str]] | 

@@ -325,9 +325,13 @@ impl PySimulator {
     /// Runs until a frame changes.
     /// 
     /// This is not meant for general use.
-    fn _run_until_frame_change(&mut self) -> PyResult<()> {
+    fn _run_until_frame_change(&mut self, stop: Option<u64>) -> PyResult<()> {
         let frame = self.sim.frame_stack.len();
-        self.sim.run_while(|s| s.frame_stack.len() == frame)
+
+        self.sim.run_while(|sim| match stop {
+            Some(stop) => sim.frame_stack.len() == frame && sim.instructions_run < stop,
+            None => sim.frame_stack.len() == frame
+        })
             .map_err(|e| SimError::from_lc3_err(e, self.sim.prefetch_pc()))
     }
     

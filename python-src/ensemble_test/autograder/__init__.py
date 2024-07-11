@@ -17,7 +17,7 @@ Flag to hide traceback from this file in unit tests.
 Useful for removing the tracebacks from helper functions here! :D
 """
 
-INSTRUCTION_RUN_LIMIT = 0xABCDE
+INSTRUCTION_RUN_LIMIT = 0xA_2110
 
 def _to_u16(val: int) -> int:
     return val & 0xFFFF
@@ -58,6 +58,15 @@ class CallNode:
     args: list[int]
     ret: int | None = None
     
+class _ExecType(enum.Enum):
+    RUN_CODE = enum.auto()
+    CALL_SUBROUTINE = enum.auto()
+_ExecProperties: typing.TypeAlias = (
+    # def runCode(self, max_instrs_run: int)
+    tuple[typing.Literal[_ExecType.RUN_CODE], int] |
+    # def callSubroutine(self, label: str, args: list[int], R5: int, R6: int, R7: int, max_instrs_run: int)
+    tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int, int]
+)
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
         self.sim = core.Simulator()
@@ -79,6 +88,10 @@ class LC3UnitTestCase(unittest.TestCase):
         # - If this is a `str`, it comes from inline code.
         # - If this is `None`, it has not yet been declared.
         self.source_code: Path | str | None = None
+
+        # The execution type.
+        # If this is None, then no execution has occurred.
+        self.exec_props: _ExecProperties | None = None
     
     ##### HELPERS #####
 
@@ -142,6 +155,10 @@ class LC3UnitTestCase(unittest.TestCase):
             self.sim.load_code(self.source_code)
         else:
             self.source_code = None
+
+        # Reset these if successfully replaced the simulator's state
+        self.saved_registers = None
+        self.exec_props = None
 
     def _saveRegisters(self):
         self.saved_registers = [self.sim.get_reg(i) for i in range(8)]
@@ -389,10 +406,11 @@ class LC3UnitTestCase(unittest.TestCase):
         """
         self._verify_ready_to_exec()
         self._saveRegisters()
+        self.exec_props = (_ExecType.RUN_CODE, max_instrs_run)
         self.sim.run(max_instrs_run)
 
 
-    def callSubroutine(self, label: str, args: list[int]) -> list[CallNode]:
+    def callSubroutine(self, label: str, args: list[int], R5 = 0x5555, R6 = 0x6666, R7 = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> list[CallNode]:
         """
         Calls a subroutine with the provided arguments.
 
@@ -419,8 +437,6 @@ class LC3UnitTestCase(unittest.TestCase):
             or if the simulator does not have the debug_frames flag enabled
         """
         self._verify_ready_to_exec()
-
-        R5, R6, R7 = 0x5555, 0x6666, 0x7777
         
         addr = self._lookup(label)
         defn = self.sim.get_subroutine_def(addr)
@@ -460,14 +476,16 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.write_mem(R7, self.sim.read_mem(R7)) # initialize this mem loc so that it doesn't crash when calling in strict mode
 
         self._saveRegisters()
+        self.exec_props = (_ExecType.CALL_SUBROUTINE, label, args, R5, R6, R7, max_instrs_run)
         self.sim.call_subroutine(addr)
         
         path: list[CallNode] = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
         curr_path: list[CallNode] = [*path]
 
-        while self.sim.frame_number >= path[0].frame_no and not self.sim.hit_halt():
+        start = self.sim.instructions_run
+        while self.sim.frame_number >= path[0].frame_no and not self.sim.hit_halt() and self.sim.instructions_run - start < max_instrs_run:
             last_frame_no = self.sim.frame_number
-            self.sim._run_until_frame_change()
+            self.sim._run_until_frame_change(start + max_instrs_run)
 
             if self.sim.frame_number > last_frame_no:
                 last_frame = self.sim.last_frame
@@ -683,7 +701,7 @@ class LC3UnitTestCase(unittest.TestCase):
         elif not all(0 <= r < 8 for r in regs):
                 raise InternalArgError("regs argument has to consist of register numbers (which are between 0 and 7 inclusive)")
     
-        if self.saved_registers is None:
+        if self.exec_props is None or self.saved_registers is None:
             raise InternalArgError("cannot call assertRegsPreserved before an execution method (e.g., runCode or callSubroutine)")
         
         for r in regs:
@@ -695,18 +713,47 @@ class LC3UnitTestCase(unittest.TestCase):
     
     def assertStackCorrect(self):
         """
-        Asserts the stack is managed correctly after an execution.
+        Asserts the stack is managed correctly after a subroutine call.
+
+        Raises
+        ------
+        InternalArgError
+            If this function is called before self.callSubroutine is executed or after self.runCode is executed.
         """
+        if (self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE) or self.saved_registers is None:
+            raise InternalArgError("self.assertStackCorrect can only be called after self.callSubroutine")
+        
+        self._assertShortEqual(
+            self.saved_registers[6], 
+            self.sim.r6,
+            f"Stack was not managed properly for subroutine {self.exec_props[1]!r}"
+        )
         
     def assertHalted(self):
         """
         Asserts that the program halted correctly.
+
+        Raises
+        ------
+        InternalArgError
+            If this function is called before self.runCode is executed or after self.callSubroutine is executed.
         """
+        if self.exec_props is None or self.exec_props[0] != _ExecType.RUN_CODE:
+            raise InternalArgError("self.assertHalted can only be called after self.runCode")
+        
         if not self.sim.hit_halt():
             self.fail("Program did not halt correctly")
     
     def assertReturned(self):
         """
         Asserts that the execution returned correctly.
+
+        Raises
+        ------
+        InternalArgError
+            If this function is called before self.callSubroutine is executed or after self.runCode is executed.
         """
+        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE:
+            raise InternalArgError("self.assertHalted can only be called after self.runCode")
+        
         self.assertPC(self.sim.r7)
