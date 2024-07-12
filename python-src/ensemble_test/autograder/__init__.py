@@ -725,16 +725,20 @@ class LC3UnitTestCase(unittest.TestCase):
         Raises
         ------
         InternalArgError
-            If this function is called before self.callSubroutine is executed or after self.runCode is executed.
+            If a call to this function wasn't preceded by a self.callSubroutine execution.
         """
         if (self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE) or self.saved_registers is None:
             raise InternalArgError("self.assertStackCorrect can only be called after self.callSubroutine")
         
-        self._assertShortEqual(
-            self.saved_registers[6], 
-            self.sim.r6,
-            f"Stack was not managed properly for subroutine {self.exec_props[1]!r}"
-        )
+        # This should check for overflow, 
+        # but that is such a degenerate case that it's probably fine to ignore.
+        orig_sp  = _to_u16(self.saved_registers[6])
+        final_sp = _to_u16(self.sim.r6)
+
+        if final_sp < orig_sp:
+            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were more items remaining in the stack than expected")
+        if final_sp > orig_sp:
+            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were less items remaining in the stack than expected")
         
     def assertHalted(self):
         """
@@ -743,10 +747,13 @@ class LC3UnitTestCase(unittest.TestCase):
         Raises
         ------
         InternalArgError
-            If this function is called before self.runCode is executed or after self.callSubroutine is executed.
+            If a call to this function wasn't preceded by a self.runCode execution.
         """
         if self.exec_props is None or self.exec_props[0] != _ExecType.RUN_CODE:
-            raise InternalArgError("self.assertHalted can only be called after self.runCode")
+            raise InternalArgError(
+                "self.assertHalted can only be called after self.runCode.\n"
+                "If you meant to check if the subroutine returned, use self.assertReturned."
+            )
         
         if not self.sim.hit_halt():
             self.fail("Program did not halt correctly")
@@ -758,9 +765,12 @@ class LC3UnitTestCase(unittest.TestCase):
         Raises
         ------
         InternalArgError
-            If this function is called before self.callSubroutine is executed or after self.runCode is executed.
+            If a call to this function wasn't preceded by a self.callSubroutine execution.
         """
         if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE:
-            raise InternalArgError("self.assertHalted can only be called after self.runCode")
+            raise InternalArgError(
+                "self.assertHalted can only be called after self.runCode.\n"
+                "If you meant to check if the subroutine halted, use self.assertHalted."
+            )
         
         self.assertPC(self.sim.r7)
