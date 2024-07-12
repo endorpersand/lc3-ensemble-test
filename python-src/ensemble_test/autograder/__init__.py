@@ -62,10 +62,10 @@ class _ExecType(enum.Enum):
     RUN_CODE = enum.auto()
     CALL_SUBROUTINE = enum.auto()
 _ExecProperties: typing.TypeAlias = (
-    # def runCode(self, max_instrs_run: int)
+    # runCode(self, max_instrs_run: int)
     tuple[typing.Literal[_ExecType.RUN_CODE], int] |
-    # def callSubroutine(self, label: str, args: list[int], R5: int, R6: int, R7: int, max_instrs_run: int)
-    tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int, int]
+    # callSubroutine(self, label: str, args: list[int], R6: int, PC: int, max_instrs_run: int)
+    tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int]
 )
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
@@ -410,12 +410,12 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.run(max_instrs_run)
 
 
-    def callSubroutine(self, label: str, args: list[int], R5 = 0x5555, R6 = 0x6666, R7 = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> list[CallNode]:
+    def callSubroutine(self, label: str, args: list[int], R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> list[CallNode]:
         """
         Calls a subroutine with the provided arguments.
 
         This loads the arguments into the LC-3 machine, executes the subroutine,
-        and computes the return address.
+        and returns the resulting list of subroutine calls that occur as a result of this call.
 
         Parameters
         ----------
@@ -423,6 +423,13 @@ class LC3UnitTestCase(unittest.TestCase):
             The label where the subroutines are located.
         args : list[int] (list[unsigned short])
             The arguments to call the subroutine with.
+        R6: int (unsigned short), optional
+            The initial value of R6 prior to this subroutine call.
+        PC: int (unsigned short), optional
+            The initial value of the PC prior to this subroutine call.
+        max_instrs_run : int, optional
+            The maximum number of instructions to run before forcibly stopping, 
+            by default `INSTRUCTION_RUN_LIMIT`
 
         Returns
         -------
@@ -446,7 +453,6 @@ class LC3UnitTestCase(unittest.TestCase):
                 "Provide one with self.defineSubroutine."
             )
 
-        self.sim.r5 = R5
         self.sim.r6 = R6
         # Handle all arguments
         if defn[0] == core.SubroutineType.CallingConvention:
@@ -457,8 +463,9 @@ class LC3UnitTestCase(unittest.TestCase):
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
             # Write arguments to stack
+            self._writeContiguous(self.sim.r6 - len(args), args)
+            self._saveRegisters()
             self.sim.r6 -= len(args)
-            self._writeContiguous(self.sim.r6, args)
         elif defn[0] == core.SubroutineType.PassByRegister:
             params = defn[1]
             if len(params) != len(args):
@@ -469,14 +476,14 @@ class LC3UnitTestCase(unittest.TestCase):
             # Write arguments to each register
             for (_, reg_no), arg in zip(params, args):
                 self.sim.set_reg(reg_no, _to_u16(arg))
+            self._saveRegisters()
         else:
             raise NotImplementedError(f"callSubroutine: unimplemented subroutine type {defn[0]}")
         
-        self.sim.pc = R7
-        self.sim.write_mem(R7, self.sim.read_mem(R7)) # initialize this mem loc so that it doesn't crash when calling in strict mode
+        self.sim.pc = PC
+        self.sim.write_mem(PC, self.sim.read_mem(PC)) # initialize this location so that it doesn't crash when calling in strict mode
 
-        self._saveRegisters()
-        self.exec_props = (_ExecType.CALL_SUBROUTINE, label, args, R5, R6, R7, max_instrs_run)
+        self.exec_props = (_ExecType.CALL_SUBROUTINE, label, args, R6, PC, max_instrs_run)
         self.sim.call_subroutine(addr)
         
         path: list[CallNode] = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
@@ -697,7 +704,7 @@ class LC3UnitTestCase(unittest.TestCase):
             or if this function is called before an execution call.
         """
         if regs is None:
-            regs = [0, 1, 2, 3, 4, 5, 7]
+            regs = [0, 1, 2, 3, 4, 5]
         elif not all(0 <= r < 8 for r in regs):
                 raise InternalArgError("regs argument has to consist of register numbers (which are between 0 and 7 inclusive)")
     
