@@ -498,6 +498,7 @@ class LC3UnitTestCase(unittest.TestCase):
             last_frame_no = self.sim.frame_number
             self.sim._run_until_frame_change(start + max_instrs_run)
 
+            # we stepped into a subroutine
             if self.sim.frame_number > last_frame_no:
                 last_frame = self.sim.last_frame
                 if last_frame is None: raise InternalArgError("cannot compute CallNode without debug_frames")
@@ -510,16 +511,21 @@ class LC3UnitTestCase(unittest.TestCase):
                 path.append(node)
                 curr_path.append(node)
             
+            # we stepped out of a subroutine
             if self.sim.frame_number < last_frame_no:
                 node = curr_path.pop()
                 node.ret = self._getReturnValue(node.callee)
-        path[0].ret = self._getReturnValue(path[0].callee)
+        
+        # if subroutine successfully returned, compute return value
+        if self.sim.frame_number < path[0].frame_no:
+            path[0].ret = self._getReturnValue(path[0].callee)
 
         if self.sim.hit_halt():
             self.fail(f"Program halted before completing execution of subroutine {label!r}")
 
         if defn[0] == core.SubroutineType.CallingConvention:
-            # Restore stack to state before subroutine call
+            # Pop return value and arguments
+            # Offset is used for self.assertStackCorrect
             self.sim.r6 += len(args) + 1
 
         # TODO: better interface than list[CallNode]
