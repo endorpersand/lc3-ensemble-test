@@ -77,6 +77,8 @@ _ExecProperties: typing.TypeAlias = (
     # callSubroutine(self, label: str, args: list[int], R6: int, PC: int, max_instrs_run: int)
     tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int]
 )
+CallTraceList = list[CallNode]
+
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
         self.sim = core.Simulator()
@@ -99,9 +101,15 @@ class LC3UnitTestCase(unittest.TestCase):
         # - If this is `None`, it has not yet been declared.
         self.source_code: Path | str | None = None
 
+        ##### Execution
+
         # The execution type.
         # If this is None, then no execution has occurred.
         self.exec_props: _ExecProperties | None = None
+
+        # If execution was a subroutine call,
+        # this holds the return trace from that call.
+        self.call_trace_list: CallTraceList | None = None
     
     ##### HELPERS #####
 
@@ -223,11 +231,19 @@ class LC3UnitTestCase(unittest.TestCase):
 
         expected_n = expected_i if signed else expected_u
         actual_n = actual_i if signed else actual_u
-        msg = _simple_assert_msg(
-            msg or "Shorts not equal",
-            expected=f"{expected_n}" + f" (x{expected_u:04X})" if show_hex else "",
-            actual=f"{actual_n}" + f" (x{actual_u:04X})" if show_hex else ""
-        )
+
+        # create expected_str and actual_str, with format:
+        #  expected:      0 (x0000)
+        #  actual:   -29824 (x8B80)
+        expected_str, actual_str = str(expected_n), str(actual_n)
+        pad = max(len(expected_str), len(actual_str))
+        expected_str, actual_str = expected_str.rjust(pad), actual_str.rjust(pad)
+        if show_hex:
+            expected_str += f" (x{expected_u:04X})"
+            actual_str += f" (x{actual_u:04X})"
+        
+        # create msg and assert:
+        msg = _simple_assert_msg(msg or "Shorts not equal", expected_str, actual_str)
         self.assertEqual(expected_n, actual_n, msg)
     
     ##### PRECONDITIONS #####
@@ -414,7 +430,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.run(max_instrs_run)
 
 
-    def callSubroutine(self, label: str, args: list[int], R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> list[CallNode]:
+    def callSubroutine(self, label: str, args: list[int], R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> CallTraceList:
         """
         Calls a subroutine with the provided arguments.
 
@@ -529,7 +545,8 @@ class LC3UnitTestCase(unittest.TestCase):
             self.sim.r6 += len(args) + 1
 
         # TODO: better interface than list[CallNode]
-        return path
+        self.call_trace_list = CallTraceList(path)
+        return self.call_trace_list
     
     ##### ASSERTIONS #####
 
@@ -812,8 +829,77 @@ class LC3UnitTestCase(unittest.TestCase):
         """
         if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE:
             raise InternalArgError(
-                "self.assertHalted can only be called after self.runCode.\n"
+                "self.assertReturned can only be called after self.callSubroutine.\n"
                 "If you meant to check if the subroutine halted, use self.assertHalted."
             )
         
         self.assertPC(self.sim.r7, _nonnull_or_default(msg, "Subroutine did not return properly"))
+    
+    def assertReturnValue(self, expected: int, msg: str | None = None):
+        """
+        Asserts the return value of a subroutine call is correct.
+
+        Parameters
+        ----------
+        expected : int
+            The expected return value of a subroutine call.
+        msg : str | None, optional
+            A custom message to print if the assertion fails.
+
+        Raises
+        ------
+        InternalArgError
+            If a call to this function wasn't preceded by a self.callSubroutine execution.
+        """
+
+        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE or self.call_trace_list is None:
+            raise InternalArgError(
+                "self.assertReturnValue can only be called after self.callSubroutine."
+            )
+        
+        actual = self.call_trace_list[0].ret
+
+        if actual is None:
+            # I don't think this is reachable except by invalid arguments
+            # Subroutines without return values shouldn't call this function ever(?)
+            self.fail(_nonnull_or_default(msg, f"Subroutine unexpectedly did not return a value"))
+        
+        self._assertShortEqual(expected, actual, _nonnull_or_default(msg, "Incorrect return value"))
+    
+    def assertSubroutineCalled(self, label: str, msg_fmt: str | None = None):
+        """
+        Asserts that a subroutine call correctly called another subroutine.
+        
+        For example, if a helper subroutine `"BAR"` is expected to be used in subroutine `"FOO"`,
+        this could be done by producing:
+        ```py
+            self.callSubroutine("FOO", [ ... ])
+            self.assertSubroutineCalled("BAR")
+        ```
+
+        Parameters
+        ----------
+        label : str
+            Name/label of the subroutine that we expect to have been called.
+        msg_fmt : str | None, optional
+            A custom message to print if the assertion fails.
+            {0}, {1} represent the name of the subroutine called and the expected subroutine to be called respectively.
+
+        Raises
+        ------
+        InternalArgError
+            If a call to this function wasn't preceded by a self.callSubroutine execution,
+            or if the provided label does not exist.
+        """
+        
+        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE or self.call_trace_list is None:
+            raise InternalArgError(
+                "self.assertSubroutineCalled can only be called after self.callSubroutine."
+            )
+        
+        caller = self.exec_props[1]
+        callee_addr = self._lookup(label)
+
+        msg = _nonnull_or_default(msg_fmt, "Subroutine {} did not call {}").format(repr(caller), repr(label))
+        if not any(c.callee == callee_addr for c in self.call_trace_list[1:]):
+            self.fail(msg)

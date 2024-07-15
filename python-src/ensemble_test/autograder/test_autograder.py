@@ -227,6 +227,9 @@ class TestLC3Sample(LC3UnitTestCase):
 
         # assert callSubroutine errors if wrong number of arguments
         with self.assertRaises(InternalArgError) as e:
+            self.callSubroutine("SUMTORIAL", [])
+            self.assertIn("Number of arguments provided", str(e.exception))
+        with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
             self.assertIn("Number of arguments provided", str(e.exception))
 
@@ -261,6 +264,9 @@ class TestLC3Sample(LC3UnitTestCase):
         self.defineSubroutine("SUMTORIAL", {0: "n"}, ret=0)
 
         # assert callSubroutine errors if wrong number of arguments
+        with self.assertRaises(InternalArgError) as e:
+            self.callSubroutine("SUMTORIAL", [])
+            self.assertIn("Number of arguments provided", str(e.exception))
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
             self.assertIn("Number of arguments provided", str(e.exception))
@@ -319,6 +325,16 @@ class TestLC3Sample(LC3UnitTestCase):
             self.assertHalted()
             self.assertReg(6, 0xD000)
             self.assertReg(0, 4 * N)
+
+    def test_assert_subroutine_utils(self):
+        self.loadFile("test-asm/sumtorial-lc3cc.asm")
+        
+        self.defineSubroutine("SUMTORIAL", ["n"])
+        self.callSubroutine("SUMTORIAL", [5])
+
+        self.assertReturned()
+        self.assertReturnValue(15)
+        self.assertSubroutineCalled("SUMTORIAL")
 
     # def test_stack_frame(self):
     #     self.loadFile("test-asm/xy-lc3cc.asm")
