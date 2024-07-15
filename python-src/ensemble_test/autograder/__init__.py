@@ -51,6 +51,16 @@ def _verify_reg_no(reg_no: int):
     if not (0 <= reg_no <= 7):
         raise InternalArgError(f"cannot access non-existent register {reg_no}")
 
+def _simple_assert_msg(msg, expected, actual):
+    return (
+        f"{msg if msg is not None else ""}\n"
+        f"expected: {expected}\n"
+        f"actual:   {actual}"
+    )
+
+def _nonnull_or_default(value, default):
+    return value if value is not None else default
+
 @dataclasses.dataclass
 class CallNode:
     frame_no: int
@@ -184,18 +194,11 @@ class LC3UnitTestCase(unittest.TestCase):
                 raise NotImplementedError(f"_getReturnValue: unimplemented subroutine type {defn[0]}")
             
             return ret
-        
-    def _simpleAssertMsg(self, msg, expected, actual):
-        return (
-            f"{msg}\n"
-            f"expected: {expected}\n"
-            f"actual:   {actual}"
-        )
     
     def _assertShortEqual(
             self, 
             expected: int, actual: int, 
-            msg_fmt: str | None = None, *, 
+            msg: str | None = None, *, 
             signed: bool = True, 
             show_hex: bool = True
         ):
@@ -208,9 +211,8 @@ class LC3UnitTestCase(unittest.TestCase):
             The expected value
         actual : int
             The user's actual resultant value
-        msg_fmt : str, optional
-            A format to display the error.
-            This format string should use {{expected}} and {{actual}} to print those values.
+        msg : str, optional
+            A custom message to print if the assertion fails
         signed : bool, optional
             Whether the displayed value is signed or unsigned, by default True
         show_hex : bool, optional
@@ -219,12 +221,14 @@ class LC3UnitTestCase(unittest.TestCase):
         expected_i, expected_u = _to_i16(expected), _to_u16(expected)
         actual_i, actual_u = _to_i16(actual), _to_u16(actual)
 
-        msg = (msg_fmt or "Expected {expected}, but got {actual}").format(
-            expected=f"{expected_i if signed else expected_u}" + f" (x{expected_u:04X})" if show_hex else "",
-            actual=f"{actual_i if signed else actual_u}" + f" (x{actual_u:04X})" if show_hex else ""
+        expected_n = expected_i if signed else expected_u
+        actual_n = actual_i if signed else actual_u
+        msg = _simple_assert_msg(
+            msg or "Shorts not equal",
+            expected=f"{expected_n}" + f" (x{expected_u:04X})" if show_hex else "",
+            actual=f"{actual_n}" + f" (x{actual_u:04X})" if show_hex else ""
         )
-
-        self.assertEqual(expected_u, actual_u, msg)
+        self.assertEqual(expected_n, actual_n, msg)
     
     ##### PRECONDITIONS #####
 
@@ -523,7 +527,7 @@ class LC3UnitTestCase(unittest.TestCase):
     
     ##### ASSERTIONS #####
 
-    def assertReg(self, reg_no: int, expected: int):
+    def assertReg(self, reg_no: int, expected: int, msg_fmt: str | None = None):
         """
         Asserts the value at the provided register number matches the expected value.
 
@@ -533,14 +537,17 @@ class LC3UnitTestCase(unittest.TestCase):
             Register to check.
         expected : int (unsigned short)
             The expected value.
+        msg_fmt: str, optional
+            A custom message to print if the assertion fails.
+            {0} can be used in the message format to display the register number.
         """
         _verify_reg_no(reg_no)
         actual = self.sim.get_reg(reg_no)
 
-        self._assertShortEqual(expected, actual, 
-            f"Expected register {reg_no} to be {{expected}}, but it was {{actual}}")
+        msg = _nonnull_or_default(msg_fmt, "Incorrect value for register {}").format(reg_no)
+        self._assertShortEqual(expected, actual, msg)
     
-    def assertMemValue(self, label: str, expected: int):
+    def assertMemValue(self, label: str, expected: int, msg_fmt: str | None = None):
         """
         Asserts the value at the provided label matches the expected value.
 
@@ -550,14 +557,17 @@ class LC3UnitTestCase(unittest.TestCase):
             Label at the location to check.
         expected : int (unsigned short)
             The expected value.
+        msg_fmt: str, optional
+            A custom message to print if the assertion fails.
+            {0} can be used in the message format to display the label of the value.
         """
         addr = self._lookup(label)
         actual = self.sim.read_mem(addr)
 
-        self._assertShortEqual(expected, actual, 
-            f"Expected mem[{label.upper()}] to be {{expected}}, but it was {{actual}}")
+        msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(label.upper())
+        self._assertShortEqual(expected, actual, msg)
 
-    def assertArray(self, label: str, arr: list[int]):
+    def assertArray(self, label: str, arr: list[int], msg_fmt: str | None = None):
         """
         Asserts the sequence of values (array) at the provided label matches the expected array of values.
 
@@ -567,14 +577,17 @@ class LC3UnitTestCase(unittest.TestCase):
             Label at the location of the start of the array.
         arr : list[int] (list[unsigned short])
             The expected sequence of values.
+        msg_fmt: str, optional
+            A custom message to print if the assertion fails.
+            {0} can be used in the message format to display the label of the array.
         """
         addr = self._lookup(label)
         
         expected = [_to_u16(e) for e in arr]
         actual = list(self._readContiguous(addr, len(arr)))
 
-        self.assertEqual(expected, actual, 
-            self._simpleAssertMsg(f"Array at label {label.upper()} did not match expected", expected, actual))
+        msg = _nonnull_or_default(msg_fmt, "Array at label {} did not match expected").format(label.upper())
+        self.assertEqual(expected, actual, _simple_assert_msg(msg, expected, actual))
 
     def assertString(self, label: str, expected_str: str):
         """
@@ -598,7 +611,7 @@ class LC3UnitTestCase(unittest.TestCase):
             if ch == 0:
                 actual_str = bytes(actual[:i]).decode("ascii") # ok because we checked beforehand
                 self.fail(
-                    self._simpleAssertMsg(f"String at {label.upper()} shorter than expected",
+                    _simple_assert_msg(f"String at {label.upper()} shorter than expected",
                         f"{expected_str} {expected}",
                         f"{actual_str.ljust(len(expected_str))} {actual}")
                 )
@@ -613,7 +626,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Verify last element is the null-terminator
         if actual[-1] != 0:
             self.fail(
-                self._simpleAssertMsg(f"String at {label.upper()} longer than expected", 
+                _simple_assert_msg(f"String at {label.upper()} longer than expected", 
                     f"{expected_str}    {expected}", 
                     f"{actual_str}... {actual}")
             )
@@ -621,13 +634,13 @@ class LC3UnitTestCase(unittest.TestCase):
         # Check for mismatches
         for e, a in zip(expected, actual):
             self.assertEqual(e, a,
-                self._simpleAssertMsg(f"String at label {label.upper()} did not match expected", 
+                _simple_assert_msg(f"String at label {label.upper()} did not match expected", 
                     f"{expected_str} {expected}", 
                     f"{actual_str} {actual}"
                 )
             )
     
-    def assertOutput(self, expected: str):
+    def assertOutput(self, expected: str, msg: str | None = None):
         """
         Assert the current output string matches the expected string.
 
@@ -635,6 +648,8 @@ class LC3UnitTestCase(unittest.TestCase):
         ----------
         expected : str
             The expected string.
+        msg: str, optional
+            A custom message to print if the assertion fails.
         """
         # There's technically nothing wrong with non-ASCII inputs for this method,
         # and it could accept non-ASCII text if it wanted
@@ -644,9 +659,14 @@ class LC3UnitTestCase(unittest.TestCase):
         _verify_ascii_string(expected, arg_desc=f"expected string parameter ({expected=!r})")
         actual = self.sim.output
         self.assertEqual(expected, actual,
-                         self._simpleAssertMsg("Console output did not match expected", expected, actual))
+            _simple_assert_msg(
+                _nonnull_or_default(msg, "Console output did not match expected"), 
+                expected, 
+                actual
+            )
+        )
 
-    def assertPC(self, expected: int):
+    def assertPC(self, expected: int, msg: str | None = None):
         """
         Assert the PC matches the expected value.
 
@@ -654,12 +674,15 @@ class LC3UnitTestCase(unittest.TestCase):
         ----------
         expected : int (unsigned short)
             The expected address of the PC.
+        msg: str, optional
+            A custom message to print if the assertion fails.
         """
         self._assertShortEqual(expected, self.sim.pc,
-                                  f"Expected PC to be {{expected}}, but it was {{actual}}",
-                                  signed = False)
+            _nonnull_or_default(msg, f"Incorrect value for PC"),
+            signed = False
+        )
     
-    def assertCondCode(self, expected: typing.Literal["n", "z", "p"]):
+    def assertCondCode(self, expected: typing.Literal["n", "z", "p"], msg_fmt: str | None = None):
         """
         Assert the condition code matches the expected condition code.
 
@@ -667,6 +690,9 @@ class LC3UnitTestCase(unittest.TestCase):
         ----------
         expected : typing.Literal["n", "z", "p"]
             The expected condition code.
+        msg_fmt: str, optional
+            A custom message to print if the assertion fails.
+            {0} and {1} can be used in the message format to display the expected and actual condition codes.
         """
         if expected not in ('n', 'z', 'p'): 
             raise InternalArgError(f"expected parameter should be 'n', 'z', or 'p' ({expected=!r})")
@@ -685,9 +711,10 @@ class LC3UnitTestCase(unittest.TestCase):
         else:
             actual = "p"
 
-        self.assertEqual(expected, actual, f"Expected condition code to be {expected}, but it was {actual}")
+        msg = _nonnull_or_default(msg_fmt, "Incorrect condition code (expected {}, got {})").format(repr(expected), repr(actual))
+        self.assertEqual(expected, actual, msg)
     
-    def assertRegsPreserved(self, regs: list[int] | None = None):
+    def assertRegsPreserved(self, regs: list[int] | None = None, msg_fmt: str | None = None):
         """
         Asserts the values of the given registers are unchanged after an execution.
 
@@ -696,6 +723,9 @@ class LC3UnitTestCase(unittest.TestCase):
         regs : list[int], optional
             List of registers to verify were preserved.
             If not provided, this defaults to all registers except R6.
+        msg_fmt: str, optional
+            A custom message to print if the assertion fails.
+            {0} can be used in the message format to display the first mismatching register.
 
         Raises
         ------
@@ -712,11 +742,8 @@ class LC3UnitTestCase(unittest.TestCase):
             raise InternalArgError("cannot call assertRegsPreserved before an execution method (e.g., runCode or callSubroutine)")
         
         for r in regs:
-            self._assertShortEqual(
-                self.saved_registers[r],
-                self.sim.get_reg(r),
-                f"Expected registers to be preserved: register {r} was expected to be {{expected}}, but was {{actual}}"
-            )
+            msg =  _nonnull_or_default(msg_fmt, "Registers changed after execution: incorrect value for register {}").format(r)
+            self._assertShortEqual(self.saved_registers[r], self.sim.get_reg(r), msg)
     
     def assertStackCorrect(self):
         """
@@ -738,11 +765,16 @@ class LC3UnitTestCase(unittest.TestCase):
         if final_sp < orig_sp:
             self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were more items remaining in the stack than expected")
         if final_sp > orig_sp:
-            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were less items remaining in the stack than expected")
+            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were fewer items remaining in the stack than expected")
         
-    def assertHalted(self):
+    def assertHalted(self, msg: str | None = None):
         """
         Asserts that the program halted correctly.
+        
+        Parameters
+        ----------
+        msg: str, optional
+            A custom message to print if the assertion fails.
 
         Raises
         ------
@@ -756,11 +788,16 @@ class LC3UnitTestCase(unittest.TestCase):
             )
         
         if not self.sim.hit_halt():
-            self.fail("Program did not halt correctly")
+            self.fail(_nonnull_or_default(msg, "Program did not halt correctly"))
     
-    def assertReturned(self):
+    def assertReturned(self, msg: str | None = None):
         """
         Asserts that the execution returned correctly.
+        
+        Parameters
+        ----------
+        msg: str, optional
+            A custom message to print if the assertion fails.
 
         Raises
         ------
@@ -773,4 +810,4 @@ class LC3UnitTestCase(unittest.TestCase):
                 "If you meant to check if the subroutine halted, use self.assertHalted."
             )
         
-        self.assertPC(self.sim.r7)
+        self.assertPC(self.sim.r7, _nonnull_or_default(msg, "Subroutine did not return properly"))
