@@ -67,7 +67,8 @@ class CallNode:
     callee: int
     args: list[int]
     ret: int | None = None
-    
+CallTraceList = list[CallNode]
+
 class _ExecType(enum.Enum):
     RUN_CODE = enum.auto()
     CALL_SUBROUTINE = enum.auto()
@@ -77,7 +78,6 @@ _ExecProperties: typing.TypeAlias = (
     # callSubroutine(self, label: str, args: list[int], R6: int, PC: int, max_instrs_run: int)
     tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int]
 )
-CallTraceList = list[CallNode]
 
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
@@ -142,7 +142,15 @@ class LC3UnitTestCase(unittest.TestCase):
             raise ValueError(f"Label {label.upper()} is missing in the assembly code")
 
         return addr
-        
+    
+    def _resolveAddr(self, loc: str | int) -> int:
+        if isinstance(loc, str):
+            return self._lookup(loc)
+        elif isinstance(loc, int):
+            return _to_u16(loc)
+        else:
+            raise ValueError(f"Cannot resolve location of type {type(loc)} into an address")
+
     def _printStackFrame(self):
         stack = self.sim.frames or []
         for i, frame in enumerate(stack):
@@ -300,47 +308,47 @@ class LC3UnitTestCase(unittest.TestCase):
         self.source_code = src
         self._load_from_src()
 
-    def writeMemValue(self, label: str, value: int):
+    def writeMemValue(self, loc: str | int, value: int):
         """
         Writes a memory value into the provided label location.
 
         Parameters
         ----------
-        label : str
-            Label at the location to write a value into.
+        loc : str | int
+            Label or address (as a unsigned short) of the memory location to write to.
         value : int (unsigned short)
             Value to write.
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
         self.sim.write_mem(addr, _to_u16(value))
     
-    def writeArray(self, label: str, lst: list[int]):
+    def writeArray(self, loc: str | int, lst: list[int]):
         """
         Writes a contiguous sequence of memory values (an array) starting at the provided label location.
 
         Parameters
         ----------
-        label : str
-            Label at the location to write an array into.
+        loc : str | int
+            Label or address (as a unsigned short) of the location to write an array to.
         lst : list[int] (list[unsigned short])
             Array to write.
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
         self._writeContiguous(addr, lst)
 
-    def writeString(self, label: str, string: str):
+    def writeString(self, loc: str | int, string: str):
         """
         Writes a null-terminated string into memory starting at the provided label location.
 
         Parameters
         ----------
-        label : str
-            Label at the location to write a string into.
+        loc : str | int
+            Label or address (as a unsigned short) of the location to write a string to.
         string : str
             String to write (must be ASCII).
             A null terminator will be added to the end of this string.
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
         string_bytes = _verify_ascii_string(string, arg_desc=f"string value parameter ({string=!r})")
 
         self._writeContiguous(addr, string_bytes)
@@ -373,14 +381,14 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.input = inp
 
 
-    def defineSubroutine(self, loc: int | str, params: list[str] | dict[int, str], ret: int | None = None):
+    def defineSubroutine(self, loc: str | int, params: list[str] | dict[int, str], ret: int | None = None):
         """
         Defines a subroutine signature to be called in `self.callSubroutine`.
 
         Parameters
         ----------
-        loc : int | str
-            Location of subroutine (either an unsigned short address or a label)
+        loc : str | int
+            Location of subroutine (either a label or unsigned short address)
         params : list[str] | dict[int, str]
             The parameters of the subroutine.
 
@@ -570,62 +578,64 @@ class LC3UnitTestCase(unittest.TestCase):
         msg = _nonnull_or_default(msg_fmt, "Incorrect value for register {}").format(reg_no)
         self._assertShortEqual(expected, actual, msg)
     
-    def assertMemValue(self, label: str, expected: int, msg_fmt: str | None = None):
+    def assertMemValue(self, loc: str | int, expected: int, msg_fmt: str | None = None):
         """
         Asserts the value at the provided label matches the expected value.
 
         Parameters
         ----------
-        label : str
-            Label at the location to check.
+        loc: str | int
+            Label or address (as a unsigned short) of the memory location to check.
         expected : int (unsigned short)
             The expected value.
         msg_fmt: str, optional
             A custom message to print if the assertion fails.
             {0} can be used in the message format to display the label of the value.
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
         actual = self.sim.read_mem(addr)
 
-        msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(label.upper())
+        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
+        msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(loc_name)
         self._assertShortEqual(expected, actual, msg)
 
-    def assertArray(self, label: str, arr: list[int], msg_fmt: str | None = None):
+    def assertArray(self, loc: str | int, arr: list[int], msg_fmt: str | None = None):
         """
         Asserts the sequence of values (array) at the provided label matches the expected array of values.
 
         Parameters
         ----------
-        label : str
-            Label at the location of the start of the array.
+        loc: str | int
+            Label or address (as a unsigned short) of the location of the array.
         arr : list[int] (list[unsigned short])
             The expected sequence of values.
         msg_fmt: str, optional
             A custom message to print if the assertion fails.
             {0} can be used in the message format to display the label of the array.
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
         
         expected = [_to_u16(e) for e in arr]
         actual = list(self._readContiguous(addr, len(arr)))
 
-        msg = _nonnull_or_default(msg_fmt, "Array at label {} did not match expected").format(label.upper())
+        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
+        msg = _nonnull_or_default(msg_fmt, "Array at location {} did not match expected").format(loc_name)
         self.assertEqual(expected, actual, _simple_assert_msg(msg, expected, actual))
 
-    def assertString(self, label: str, expected_str: str):
+    def assertString(self, loc: str | int, expected_str: str):
         """
         Asserts the string at the provided label matches the expected string and correctly includes the null -terminator.
 
         Parameters
         ----------
-        label : str
-            Label at the location of the string to check.
+        loc: str | int
+            Label or address (as a unsigned short) of the location the string to check.
         expected_str : str
             The expected string (must be ASCII).
         """
-        addr = self._lookup(label)
+        addr = self._resolveAddr(loc)
+        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
         expected_bytes = _verify_ascii_string(expected_str, arg_desc=f"expected string parameter ({expected_str=!r})")
-        
         expected = [*expected_bytes, 0]
         actual = list(self._readContiguous(addr, len(expected)))
         
@@ -634,13 +644,13 @@ class LC3UnitTestCase(unittest.TestCase):
             if ch == 0:
                 actual_str = bytes(actual[:i]).decode("ascii") # ok because we checked beforehand
                 self.fail(
-                    _simple_assert_msg(f"String at {label.upper()} shorter than expected",
+                    _simple_assert_msg(f"String at {loc_name} shorter than expected",
                         f"{expected_str} {expected}",
                         f"{actual_str.ljust(len(expected_str))} {actual}")
                 )
             elif not (0 <= ch <= 127):
                 fail_array = f"[{', '.join(map(str, actual[:i + 1]))}, ...]"
-                self.fail(f"Found invalid ASCII byte in string at label {label.upper()}: {fail_array}")
+                self.fail(f"Found invalid ASCII byte in string at location {loc_name}: {fail_array}")
 
         # ok because we checked beforehand
         # the actual string doesn't include the last element, so we omit it in any following print statements
@@ -649,7 +659,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Verify last element is the null-terminator
         if actual[-1] != 0:
             self.fail(
-                _simple_assert_msg(f"String at {label.upper()} longer than expected", 
+                _simple_assert_msg(f"String at {loc_name} longer than expected", 
                     f"{expected_str}    {expected}", 
                     f"{actual_str}... {actual}")
             )
@@ -657,7 +667,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Check for mismatches
         for e, a in zip(expected, actual):
             self.assertEqual(e, a,
-                _simple_assert_msg(f"String at label {label.upper()} did not match expected", 
+                _simple_assert_msg(f"String at location {loc_name} did not match expected", 
                     f"{expected_str} {expected}", 
                     f"{actual_str} {actual}"
                 )
