@@ -79,6 +79,91 @@ _ExecProperties: typing.TypeAlias = (
     tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int]
 )
 
+MemLocation: typing.TypeAlias = "str | int | _LocatedInt"
+_ILoc: typing.TypeAlias = (
+    tuple[typing.Literal["register"], int, int] | # register(reg_no, offset)
+    tuple[typing.Literal["memory"], MemLocation, int] # memory(addr or label, offset)
+)
+class _LocatedInt(int):
+    """
+    An integer that keeps track (or atleast tries to keep track) of its origin.
+
+    This class is intended to interact transparently with `int`s,
+    and any operations that can be done with `int` is preserved.
+    
+    In other words, users of the test should not be able to distinguish this class
+    from `int`.
+
+    The origin is annotated with one of the following: 
+    - register number + offset
+    - memory label + offset
+    - memory address + offset
+
+    This class is useful for preserving origin information for errors and state validation
+    in cases of indirect memory accesses while keeping the test case easy to read.
+
+    Here is an example of what this class allows:
+    ```py
+    visited_addr: int = self.readMemValue("LABEL") # x9F9F
+    self.assertMemValue(visited_addr + 2, x9494) # AssertionError: mem[mem[LABEL] + 2] is incorrect
+    ```
+
+    The origin is only preserved if `object`, `(object + integer offset)`, or `(object - integer offset)` 
+    are input into a location parameter of a write* or assert* function. Any other operations
+    (e.g., multiplication) will erase the origin.
+    """
+    _origin: _ILoc | None
+    def __new__(cls, value: int, *, origin: _ILoc | None): 
+        o = super().__new__(cls, value)
+        o._origin = origin
+        return o
+    
+    def _new_origin(self, offset: int) -> _ILoc | None:
+        if self._origin is None: return None
+        [*rest, current_off] = self._origin
+        return (*rest, current_off + offset) # type: ignore
+    
+    def __add__(self, other: int) -> typing.Self:
+        return self.__class__(super().__add__(other), origin=self._new_origin(other))
+    def __sub__(self, other: int) -> typing.Self:
+        return self.__class__(super().__sub__(other), origin=self._new_origin(-other))
+
+def _get_loc_name(loc: MemLocation) -> str:
+    """
+    Computes a descriptive name for a label or an address.
+
+    Parameters
+    ----------
+    loc : str | int
+        Location (either a label or an unsigned short address)
+
+    Returns
+    -------
+    str
+        The descriptive name.
+        - For labels, this is simply the name of the label.
+        - For addresses, this is the hex form of the address (e.g., `38807` -> `x9797`)
+    """
+    if isinstance(loc, _LocatedInt) and loc._origin is not None:
+        if loc._origin[0] == "register":
+            name = f"R{loc._origin[1]}"
+        elif loc._origin[0] == "memory":
+            name = f"mem[{_get_loc_name(loc._origin[1])}]"
+        else:
+            raise ValueError(f"_LocatedInt origin should not have origin type {loc._origin[0]!r}")
+    
+        if loc._origin[2] < 0:
+            name += f" - {abs(loc._origin[2])}"
+        elif loc._origin[2] > 0:
+            name += f" + {loc._origin[2]}"
+        return name
+    elif isinstance(loc, int):
+        return f"x{_to_u16(loc):04X}"
+    elif isinstance(loc, str):
+        return loc.upper()
+    else:
+        raise ValueError(f"cannot find name of location of type {type(loc)}")
+
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
         self.sim = core.Simulator()
@@ -143,7 +228,13 @@ class LC3UnitTestCase(unittest.TestCase):
 
         return addr
     
-    def _resolveAddr(self, loc: str | int) -> int:
+    def _resolveAddr(self, loc: MemLocation) -> int:
+        """
+        Computes the address this memory location is equivalent to.
+        
+        Note that this function wipes any origin information 
+        and therefore the result should not be input to any MemLocation parameters.
+        """
         if isinstance(loc, str):
             return self._lookup(loc)
         elif isinstance(loc, int):
@@ -308,7 +399,41 @@ class LC3UnitTestCase(unittest.TestCase):
         self.source_code = src
         self._load_from_src()
 
-    def writeMemValue(self, loc: str | int, value: int):
+    def readMemValue(self, loc: MemLocation) -> int:
+        """
+        Reads the memory value from a given location.
+
+        Parameters
+        ----------
+        loc : MemLocation
+            Label or address (as a unsigned short) of the memory location to read from.
+
+        Returns
+        -------
+        int
+            Value at the memory location.
+        """
+        addr = self._resolveAddr(loc)
+        return _LocatedInt(self.sim.read_mem(addr), origin=("memory", loc, 0))
+    
+    def getReg(self, reg_no: int) -> int:
+        """
+        Reads the value from a given register.
+
+        Parameters
+        ----------
+        reg_no : int
+            Register to read.
+
+        Returns
+        -------
+        int
+            Value at the given register.
+        """
+        _verify_reg_no(reg_no)
+        return _LocatedInt(self.sim.get_reg(reg_no), origin=("register", reg_no, 0))
+    
+    def writeMemValue(self, loc: MemLocation, value: int):
         """
         Writes a memory value into the provided label location.
 
@@ -322,7 +447,7 @@ class LC3UnitTestCase(unittest.TestCase):
         addr = self._resolveAddr(loc)
         self.sim.write_mem(addr, _to_u16(value))
     
-    def writeArray(self, loc: str | int, lst: list[int]):
+    def writeArray(self, loc: MemLocation, lst: list[int]):
         """
         Writes a contiguous sequence of memory values (an array) starting at the provided label location.
 
@@ -336,7 +461,7 @@ class LC3UnitTestCase(unittest.TestCase):
         addr = self._resolveAddr(loc)
         self._writeContiguous(addr, lst)
 
-    def writeString(self, loc: str | int, string: str):
+    def writeString(self, loc: MemLocation, string: str):
         """
         Writes a null-terminated string into memory starting at the provided label location.
 
@@ -381,7 +506,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.input = inp
 
 
-    def defineSubroutine(self, loc: str | int, params: list[str] | dict[int, str], ret: int | None = None):
+    def defineSubroutine(self, loc: MemLocation, params: list[str] | dict[int, str], ret: int | None = None):
         """
         Defines a subroutine signature to be called in `self.callSubroutine`.
 
@@ -578,13 +703,13 @@ class LC3UnitTestCase(unittest.TestCase):
         msg = _nonnull_or_default(msg_fmt, "Incorrect value for register {}").format(reg_no)
         self._assertShortEqual(expected, actual, msg)
     
-    def assertMemValue(self, loc: str | int, expected: int, msg_fmt: str | None = None):
+    def assertMemValue(self, loc: MemLocation, expected: int, msg_fmt: str | None = None):
         """
         Asserts the value at the provided label matches the expected value.
 
         Parameters
         ----------
-        loc: str | int
+        loc: MemLocation
             Label or address (as a unsigned short) of the memory location to check.
         expected : int (unsigned short)
             The expected value.
@@ -595,17 +720,16 @@ class LC3UnitTestCase(unittest.TestCase):
         addr = self._resolveAddr(loc)
         actual = self.sim.read_mem(addr)
 
-        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
-        msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(loc_name)
+        msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(_get_loc_name(loc))
         self._assertShortEqual(expected, actual, msg)
 
-    def assertArray(self, loc: str | int, arr: list[int], msg_fmt: str | None = None):
+    def assertArray(self, loc: MemLocation, arr: list[int], msg_fmt: str | None = None):
         """
         Asserts the sequence of values (array) at the provided label matches the expected array of values.
 
         Parameters
         ----------
-        loc: str | int
+        loc: MemLocation
             Label or address (as a unsigned short) of the location of the array.
         arr : list[int] (list[unsigned short])
             The expected sequence of values.
@@ -618,23 +742,22 @@ class LC3UnitTestCase(unittest.TestCase):
         expected = [_to_u16(e) for e in arr]
         actual = list(self._readContiguous(addr, len(arr)))
 
-        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
-        msg = _nonnull_or_default(msg_fmt, "Array at location {} did not match expected").format(loc_name)
+        msg = _nonnull_or_default(msg_fmt, "Array at location {} did not match expected").format(_get_loc_name(loc))
         self.assertEqual(expected, actual, _simple_assert_msg(msg, expected, actual))
 
-    def assertString(self, loc: str | int, expected_str: str):
+    def assertString(self, loc: MemLocation, expected_str: str):
         """
         Asserts the string at the provided label matches the expected string and correctly includes the null -terminator.
 
         Parameters
         ----------
-        loc: str | int
+        loc: MemLocation
             Label or address (as a unsigned short) of the location the string to check.
         expected_str : str
             The expected string (must be ASCII).
         """
         addr = self._resolveAddr(loc)
-        loc_name = loc.upper() if isinstance(loc, str) else f"x{_to_u16(loc):04X}"
+        loc_name = _get_loc_name(loc)
         expected_bytes = _verify_ascii_string(expected_str, arg_desc=f"expected string parameter ({expected_str=!r})")
         expected = [*expected_bytes, 0]
         actual = list(self._readContiguous(addr, len(expected)))
