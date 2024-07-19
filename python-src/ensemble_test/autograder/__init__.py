@@ -261,12 +261,12 @@ class LC3UnitTestCase(unittest.TestCase):
             r7_str = f"x{r7:04X}" if r7 is not None else "?"
 
             if defn is not None:
-                if defn[0] == core.SubroutineType.CallingConvention:
-                    args = ', '.join(f"{p}={a}" for p, (a, _) in zip(defn[1], frame.arguments))
-                elif defn[0] == core.SubroutineType.PassByRegister:
-                    args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn[1], frame.arguments))
+                if isinstance(defn, core.CallingConventionSRDef):
+                    args = ', '.join(f"{p}={a}" for p, (a, _) in zip(defn.params, frame.arguments))
+                elif isinstance(defn, core.PassByRegisterSRDef):
+                    args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn.params, frame.arguments))
                 else:
-                    raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {defn[0]}")
+                    raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {type(defn)}")
             else:
                 args = "?"
             print(f"{' ' * (i * 2)}{name}({args}): fp={fp_str}, r7={r7_str}")
@@ -299,13 +299,13 @@ class LC3UnitTestCase(unittest.TestCase):
         defn = self.sim.get_subroutine_def(callee)
 
         if defn is not None:
-            if defn[0] == core.SubroutineType.CallingConvention:
+            if isinstance(defn, core.CallingConventionSRDef):
                 ret = self.sim.get_mem(self.sim.r6)
-            elif defn[0] == core.SubroutineType.PassByRegister:
-                _, _, ret_reg_no = defn
+            elif isinstance(defn, core.PassByRegisterSRDef):
+                ret_reg_no = defn.ret
                 ret = self.sim.get_reg(ret_reg_no) if ret_reg_no is not None else None
             else:
-                raise NotImplementedError(f"_getReturnValue: unimplemented subroutine type {defn[0]}")
+                raise NotImplementedError(f"_getReturnValue: unimplemented subroutine type {type(defn)}")
             
             return ret
     
@@ -543,10 +543,10 @@ class LC3UnitTestCase(unittest.TestCase):
         ```
         """
         if isinstance(params, list):
-            defn = (core.SubroutineType.CallingConvention, params)
+            defn = core.CallingConventionSRDef(params)
         elif isinstance(params, dict):
             param_list = [(v, k) for (k, v) in params.items()]
-            defn = (core.SubroutineType.PassByRegister, param_list, ret)
+            defn = core.PassByRegisterSRDef(param_list, ret)
         else:
             raise InternalArgError(f"Cannot define subroutine with parameters {params}")
         
@@ -615,30 +615,28 @@ class LC3UnitTestCase(unittest.TestCase):
 
         self.sim.r6 = R6
         # Handle all arguments
-        if defn[0] == core.SubroutineType.CallingConvention:
-            params = defn[1]
-            if len(params) != len(args):
+        if isinstance(defn, core.CallingConventionSRDef):
+            if len(defn.params) != len(args):
                 raise InternalArgError(
                     f"Number of arguments provided ({len(args)}) does not match "
-                    f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
+                    f"the number of parameters subroutine {label.upper()!r} accepts ({len(defn.params)})"
                 )
             # Write arguments to stack
             self._writeContiguous(self.sim.r6 - len(args), args)
             self._saveRegisters()
             self.sim.r6 -= len(args)
-        elif defn[0] == core.SubroutineType.PassByRegister:
-            params = defn[1]
-            if len(params) != len(args):
+        elif isinstance(defn, core.PassByRegisterSRDef):
+            if len(defn.params) != len(args):
                 raise InternalArgError(
                     f"Number of arguments provided ({len(args)}) does not match "
-                    f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
+                    f"the number of parameters subroutine {label.upper()!r} accepts ({len(defn.params)})"
                 )
             # Write arguments to each register
-            for (_param_names, reg_no), arg in zip(params, args):
+            for (_param_names, reg_no), arg in zip(defn.params, args):
                 self.sim.set_reg(reg_no, _to_u16(arg))
             self._saveRegisters()
         else:
-            raise NotImplementedError(f"callSubroutine: unimplemented subroutine type {defn[0]}")
+            raise NotImplementedError(f"callSubroutine: unimplemented subroutine type {type(defn)}")
         
         self.sim.pc = PC
         self.sim.write_mem(PC, self.sim.read_mem(PC)) # initialize this location so that it doesn't crash when calling in strict mode
@@ -679,7 +677,7 @@ class LC3UnitTestCase(unittest.TestCase):
         if self.sim.hit_halt():
             self.fail(f"Program halted before completing execution of subroutine {label!r}")
 
-        if defn[0] == core.SubroutineType.CallingConvention:
+        if isinstance(defn, core.CallingConventionSRDef):
             # Pop return value and arguments
             # Offset is used for self.assertStackCorrect
             self.sim.r6 += len(args) + 1

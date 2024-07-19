@@ -13,7 +13,7 @@ use lc3_ensemble::sim::mem::{MachineInitStrategy, MemAccessCtx, Word};
 use lc3_ensemble::sim::{SimErr, SimFlags, Simulator};
 use pyo3::types::PyInt;
 use pyo3::{create_exception, prelude::*};
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 
 /// Bindings for the LC3 simulator.
 #[pymodule]
@@ -22,7 +22,8 @@ fn ensemble_test(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("LoadError", py.get_type_bound::<LoadError>())?;
     m.add("SimError", py.get_type_bound::<SimError>())?;
     m.add_class::<MemoryFillType>()?;
-    m.add_class::<SubroutineType>()?;
+    m.add_class::<CallingConventionSRDef>()?;
+    m.add_class::<PassByRegisterSRDef>()?;
     m.add_class::<PyFrame>()?;
 
     Ok(())
@@ -79,59 +80,99 @@ enum MemoryFillType {
     Single
 }
 
-fn reg_from_py_int(reg_no: Bound<'_, PyInt>) -> PyResult<Reg> {
-    let m_reg = reg_no.extract::<u8>().ok()
-        .and_then(|i| Reg::try_from(i).ok());
-
-    m_reg.ok_or_else(|| PyIndexError::new_err(format!("register {reg_no} out of bounds")))
-}
-
 #[derive(Clone, Copy)]
+struct RegWrapper(Reg);
+impl IntoPy<PyObject> for RegWrapper {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        self.0.reg_no().into_py(py)
+    }
+}
+impl<'py> FromPyObject<'py> for RegWrapper {
+    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+        ob.extract::<u8>().ok()
+            .and_then(|i| Reg::try_from(i).ok())
+            .map(RegWrapper)
+            .ok_or_else(|| PyIndexError::new_err(format!("register {ob} out of bounds")))
+    }
+}
+impl std::fmt::Debug for RegWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+#[derive(Clone)]
 #[pyclass(module="ensemble_test")]
-/// Strategies to fill the memory on initializing the simulator.
-enum SubroutineType {
-    /// Arguments are passed by standard LC-3 calling convention.
-    CallingConvention,
-    /// Arguments are passed by register.
-    PassByRegister,
+/// Subroutine definition based on standard LC-3 calling convention.
+struct CallingConventionSRDef {
+    /// A list of parameter names.
+    #[pyo3(get)]
+    params: Vec<String>
+}
+#[pymethods]
+impl CallingConventionSRDef {
+    #[new]
+    fn constructor(params: Vec<String>) -> Self {
+        Self { params }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("CallingConventionSRDef(params={:?})", self.params)
+    }
+}
+#[derive(Clone)]
+#[pyclass(module="ensemble_test")]
+/// Subroutine definition based on pass-by-register calling convention.
+struct PassByRegisterSRDef {
+    /// A list of parameter names and associated register per parameter.
+    #[pyo3(get)]
+    params: Vec<(String, RegWrapper)>,
+    /// The return register (if present).
+    #[pyo3(get)]
+    ret: Option<RegWrapper>
+}
+#[pymethods]
+impl PassByRegisterSRDef {
+    #[new]
+    fn constructor(params: Vec<(String, RegWrapper)>, ret: Option<RegWrapper>) -> Self {
+        Self { params, ret }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PassByRegisterSRDef(params={:?}, ret={:?})", self.params, self.ret)
+    }
 }
 
 struct PyParamListWrapper(ParameterList);
 impl IntoPy<PyObject> for PyParamListWrapper {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
-            ParameterList::CallingConvention { params } => (SubroutineType::CallingConvention, params).into_py(py),
+            ParameterList::CallingConvention { params } => CallingConventionSRDef { params }.into_py(py),
             ParameterList::PassByRegister { params, ret } => {
                 let params: Vec<_> = params.into_iter()
-                    .map(|(s, r)| (s, r.reg_no()))
+                    .map(|(s, r)| (s, RegWrapper(r)))
                     .collect();
-                let ret = ret.map(Reg::reg_no);
+                let ret = ret.map(RegWrapper);
 
-                (SubroutineType::PassByRegister, params, ret).into_py(py)
+                PassByRegisterSRDef { params, ret }.into_py(py)
             },
         }
     }
 }
 impl<'py> FromPyObject<'py> for PyParamListWrapper {
     fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
-        match ob.get_item(0)?.extract::<SubroutineType>()? {
-            SubroutineType::CallingConvention => {
-                let (_, params) = ob.extract::<(SubroutineType, _)>()?;
-                Ok(Self(ParameterList::CallingConvention { params }))
-            },
-            SubroutineType::PassByRegister => {
-                let (_, params, ret) = ob.extract::<(SubroutineType, Vec<_>, Option<_>)>()?;
-                let params = params.into_iter()
-                    .map(|(s, r)| Ok((s, reg_from_py_int(r)?)))
-                    .collect::<PyResult<_>>()?;
-
-                let ret = match ret {
-                    Some(r) => Some(reg_from_py_int(r)?),
-                    None => None
-                };
-                
-                Ok(Self(ParameterList::PassByRegister { params, ret }))
-            }
+        if let Ok(CallingConventionSRDef { params }) = ob.extract() {
+            Ok(Self(ParameterList::CallingConvention { params }))
+        } else if let Ok(PassByRegisterSRDef { params, ret }) = ob.extract() {
+            let params = params.into_iter().map(|(s, rw)| (s, rw.0)).collect();
+            let ret = ret.map(|rw| rw.0);
+            Ok(Self(ParameterList::PassByRegister { params, ret }))
+        } else {
+            let err_msg = format!(
+                "failed to convert the value to 'Union[{}, {}]'",
+                std::any::type_name::<CallingConventionSRDef>(),
+                std::any::type_name::<PassByRegisterSRDef>()
+            );
+            Err(PyTypeError::new_err(err_msg))
         }
     }
 }
@@ -464,7 +505,7 @@ impl PySimulator {
     /// 
     /// This raises an error if the index is not between 0 and 7, inclusive.
     fn get_reg(&self, index: Bound<'_, PyInt>) -> PyResult<u16> {
-        let reg = reg_from_py_int(index)?;
+        let reg = index.extract::<RegWrapper>()?.0;
         Ok(self.sim.reg_file[reg].get())
     }
 
@@ -472,7 +513,7 @@ impl PySimulator {
     /// 
     /// This raises an error if the index is not between 0 and 7, inclusive.
     fn set_reg(&mut self, index: Bound<'_, PyInt>, val: u16) -> PyResult<()> {
-        let reg = reg_from_py_int(index)?;
+        let reg = index.extract::<RegWrapper>()?.0;
         self.sim.reg_file[reg].set(val);
         Ok(())
     }

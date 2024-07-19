@@ -8,10 +8,7 @@
 # in a Python project, it's just that there won't be type annotations
 # from the IDE.
 
-import enum
 import os
-from typing import Literal, TypeAlias
-
 
 class Simulator:
     def __new__(cls): pass
@@ -169,11 +166,14 @@ class Frame:
     @property
     def arguments(self) -> list[tuple[int, bool]]: pass
     pass
-class SubroutineType(enum.Enum):
-    CallingConvention = enum.auto()
-    PassByRegister = enum.auto()
 
-SubroutineDef: TypeAlias = (
-    tuple[Literal[SubroutineType.CallingConvention], list[str]] | 
-    tuple[Literal[SubroutineType.PassByRegister], list[tuple[str, int]], int | None]
-)
+class CallingConventionSRDef:
+    params: list[str]
+    def __new__(cls, params: list[str]): pass
+
+class PassByRegisterSRDef:
+    params: list[tuple[str, int]]
+    ret: int | None
+    def __new__(cls, params: list[tuple[str, int]], ret: int | None): pass
+
+SubroutineDef = CallingConventionSRDef | PassByRegisterSRDef
