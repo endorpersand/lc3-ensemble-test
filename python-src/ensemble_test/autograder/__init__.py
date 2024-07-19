@@ -747,7 +747,7 @@ class LC3UnitTestCase(unittest.TestCase):
         expected = [_to_u16(e) for e in arr]
         actual = list(self._readContiguous(addr, len(arr)))
 
-        msg = _nonnull_or_default(msg_fmt, "Array at location {} did not match expected").format(_get_loc_name(loc))
+        msg = _nonnull_or_default(msg_fmt, "Array starting at mem[{}] did not match expected").format(_get_loc_name(loc))
         self.assertEqual(expected, actual, _simple_assert_msg(msg, expected, actual))
 
     def assertString(self, loc: MemLocation, expected_str: str):
@@ -772,13 +772,13 @@ class LC3UnitTestCase(unittest.TestCase):
             if ch == 0:
                 actual_str = bytes(actual[:i]).decode("ascii") # ok because we checked beforehand
                 self.fail(
-                    _simple_assert_msg(f"String at {loc_name} shorter than expected",
+                    _simple_assert_msg(f"String starting at mem[{loc_name}] shorter than expected",
                         f"{expected_str} {expected}",
                         f"{actual_str.ljust(len(expected_str))} {actual}")
                 )
             elif not (0 <= ch <= 127):
                 fail_array = f"[{', '.join(map(str, actual[:i + 1]))}, ...]"
-                self.fail(f"Found invalid ASCII byte in string at location {loc_name}: {fail_array}")
+                self.fail(f"Found invalid ASCII byte in string starting at mem[{loc_name}]: {fail_array}")
 
         # ok because we checked beforehand
         # the actual string doesn't include the last element, so we omit it in any following print statements
@@ -787,7 +787,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Verify last element is the null-terminator
         if actual[-1] != 0:
             self.fail(
-                _simple_assert_msg(f"String at {loc_name} longer than expected", 
+                _simple_assert_msg(f"String starting at mem[{loc_name}] longer than expected", 
                     f"{expected_str}    {expected}", 
                     f"{actual_str}... {actual}")
             )
@@ -795,7 +795,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Check for mismatches
         for e, a in zip(expected, actual):
             self.assertEqual(e, a,
-                _simple_assert_msg(f"String at location {loc_name} did not match expected", 
+                _simple_assert_msg(f"String starting at mem[{loc_name}] did not match expected", 
                     f"{expected_str} {expected}", 
                     f"{actual_str} {actual}"
                 )
