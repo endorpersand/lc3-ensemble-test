@@ -3,7 +3,6 @@ Test case utility.
 """
 from collections.abc import Iterable
 import dataclasses
-import enum
 import itertools
 from pathlib import Path
 import typing
@@ -69,21 +68,27 @@ class CallNode:
     ret: int | None = None
 CallTraceList = list[CallNode]
 
-class _ExecType(enum.Enum):
-    RUN_CODE = enum.auto()
-    CALL_SUBROUTINE = enum.auto()
-_ExecProperties: typing.TypeAlias = (
-    # runCode(self, max_instrs_run: int)
-    tuple[typing.Literal[_ExecType.RUN_CODE], int] |
-    # callSubroutine(self, label: str, args: list[int], R6: int, PC: int, max_instrs_run: int)
-    tuple[typing.Literal[_ExecType.CALL_SUBROUTINE], str, list[int], int, int, int]
-)
+class _ExecRunCode(typing.NamedTuple):
+    max_instrs_run: int
+class _ExecCallSubroutine(typing.NamedTuple):
+    label: str
+    args: list[int]
+    R6: int
+    PC: int
+    max_instrs_run: int
+_ExecProperties = _ExecRunCode | _ExecCallSubroutine
 
 MemLocation: typing.TypeAlias = "str | int | _LocatedInt"
-_ILoc: typing.TypeAlias = (
-    tuple[typing.Literal["register"], int, int] | # register(reg_no, offset)
-    tuple[typing.Literal["memory"], MemLocation, int] # memory(addr or label, offset)
-)
+class _IOriginRegister(typing.NamedTuple):
+    # Item's origin (address) is Rx + offset
+    reg_no: int
+    offset: int
+class _IOriginIndirect(typing.NamedTuple):
+    # Item's origin (address) is mem[inner] + offset
+    inner: MemLocation
+    offset: int
+_IOrigin = _IOriginRegister | _IOriginIndirect
+
 class _LocatedInt(int):
     """
     An integer that keeps track (or atleast tries to keep track) of its origin.
@@ -112,16 +117,16 @@ class _LocatedInt(int):
     are input into a location parameter of a write* or assert* function. Any other operations
     (e.g., multiplication) will erase the origin.
     """
-    _origin: _ILoc | None
-    def __new__(cls, value: int, *, origin: _ILoc | None): 
+    _origin: _IOrigin | None
+    def __new__(cls, value: int, *, origin: _IOrigin | None): 
         o = super().__new__(cls, value)
         o._origin = origin
         return o
     
-    def _new_origin(self, offset: int) -> _ILoc | None:
+    def _new_origin(self, offset: int) -> _IOrigin | None:
         if self._origin is None: return None
-        [*rest, current_off] = self._origin
-        return (*rest, current_off + offset) # type: ignore
+        (*rest, current_off) = self._origin
+        return self._origin.__class__(*rest, current_off + offset) # type: ignore
     
     def __add__(self, other: int) -> typing.Self:
         return self.__class__(super().__add__(other), origin=self._new_origin(other))
@@ -145,17 +150,19 @@ def _get_loc_name(loc: MemLocation) -> str:
         - For addresses, this is the hex form of the address (e.g., `38807` -> `x9797`)
     """
     if isinstance(loc, _LocatedInt) and loc._origin is not None:
-        if loc._origin[0] == "register":
-            name = f"R{loc._origin[1]}"
-        elif loc._origin[0] == "memory":
-            name = f"mem[{_get_loc_name(loc._origin[1])}]"
+        origin = loc._origin
+        if isinstance(origin, _IOriginRegister):
+            name = f"R{origin.reg_no}"
+        elif isinstance(origin, _IOriginIndirect):
+            name = f"mem[{_get_loc_name(origin.inner)}]"
         else:
-            raise ValueError(f"_LocatedInt origin should not have origin type {loc._origin[0]!r}")
+            raise ValueError(f"_LocatedInt origin should not have origin type {type(origin)}")
     
-        if loc._origin[2] < 0:
-            name += f" - {abs(loc._origin[2])}"
-        elif loc._origin[2] > 0:
-            name += f" + {loc._origin[2]}"
+        if origin.offset < 0:
+            name += f" - {abs(origin.offset)}"
+        elif origin.offset > 0:
+            name += f" + {origin.offset}"
+            
         return name
     elif isinstance(loc, int):
         return f"x{_to_u16(loc):04X}"
@@ -414,7 +421,7 @@ class LC3UnitTestCase(unittest.TestCase):
             Value at the memory location.
         """
         addr = self._resolveAddr(loc)
-        return _LocatedInt(self.sim.read_mem(addr), origin=("memory", loc, 0))
+        return _LocatedInt(self.sim.read_mem(addr), origin=_IOriginIndirect(loc, 0))
     
     def getReg(self, reg_no: int) -> int:
         """
@@ -431,7 +438,7 @@ class LC3UnitTestCase(unittest.TestCase):
             Value at the given register.
         """
         _verify_reg_no(reg_no)
-        return _LocatedInt(self.sim.get_reg(reg_no), origin=("register", reg_no, 0))
+        return _LocatedInt(self.sim.get_reg(reg_no), origin=_IOriginRegister(reg_no, 0))
     
     def writeMemValue(self, loc: MemLocation, value: int):
         """
@@ -559,7 +566,7 @@ class LC3UnitTestCase(unittest.TestCase):
         """
         self._verify_ready_to_exec()
         self._saveRegisters()
-        self.exec_props = (_ExecType.RUN_CODE, max_instrs_run)
+        self.exec_props = _ExecRunCode(max_instrs_run)
         self.sim.run(max_instrs_run)
 
 
@@ -627,7 +634,7 @@ class LC3UnitTestCase(unittest.TestCase):
                     f"the number of parameters subroutine {label.upper()!r} accepts ({len(params)})"
                 )
             # Write arguments to each register
-            for (_, reg_no), arg in zip(params, args):
+            for (_param_names, reg_no), arg in zip(params, args):
                 self.sim.set_reg(reg_no, _to_u16(arg))
             self._saveRegisters()
         else:
@@ -636,7 +643,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.pc = PC
         self.sim.write_mem(PC, self.sim.read_mem(PC)) # initialize this location so that it doesn't crash when calling in strict mode
 
-        self.exec_props = (_ExecType.CALL_SUBROUTINE, label, args, R6, PC, max_instrs_run)
+        self.exec_props = _ExecCallSubroutine(label, args, R6, PC, max_instrs_run)
         self.sim.call_subroutine(addr)
         
         path: list[CallNode] = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
@@ -910,7 +917,7 @@ class LC3UnitTestCase(unittest.TestCase):
         InternalArgError
             If a call to this function wasn't preceded by a self.callSubroutine execution.
         """
-        if (self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE) or self.saved_registers is None:
+        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.saved_registers is None:
             raise InternalArgError("self.assertStackCorrect can only be called after self.callSubroutine")
         
         # This should check for overflow, 
@@ -919,9 +926,9 @@ class LC3UnitTestCase(unittest.TestCase):
         final_sp = _to_u16(self.sim.r6)
 
         if final_sp < orig_sp:
-            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were more items remaining in the stack than expected")
+            self.fail(f"Stack was not managed properly for subroutine {self.exec_props.label!r}: there were more items remaining in the stack than expected")
         if final_sp > orig_sp:
-            self.fail(f"Stack was not managed properly for subroutine {self.exec_props[1]!r}: there were fewer items remaining in the stack than expected")
+            self.fail(f"Stack was not managed properly for subroutine {self.exec_props.label!r}: there were fewer items remaining in the stack than expected")
         
     def assertHalted(self, msg: str | None = None):
         """
@@ -937,7 +944,7 @@ class LC3UnitTestCase(unittest.TestCase):
         InternalArgError
             If a call to this function wasn't preceded by a self.runCode execution.
         """
-        if self.exec_props is None or self.exec_props[0] != _ExecType.RUN_CODE:
+        if not isinstance(self.exec_props, _ExecRunCode):
             raise InternalArgError(
                 "self.assertHalted can only be called after self.runCode.\n"
                 "If you meant to check if the subroutine returned, use self.assertReturned."
@@ -960,7 +967,7 @@ class LC3UnitTestCase(unittest.TestCase):
         InternalArgError
             If a call to this function wasn't preceded by a self.callSubroutine execution.
         """
-        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE:
+        if not isinstance(self.exec_props, _ExecCallSubroutine):
             raise InternalArgError(
                 "self.assertReturned can only be called after self.callSubroutine.\n"
                 "If you meant to check if the subroutine halted, use self.assertHalted."
@@ -985,7 +992,7 @@ class LC3UnitTestCase(unittest.TestCase):
             If a call to this function wasn't preceded by a self.callSubroutine execution.
         """
 
-        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE or self.call_trace_list is None:
+        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.call_trace_list is None:
             raise InternalArgError(
                 "self.assertReturnValue can only be called after self.callSubroutine."
             )
@@ -1025,12 +1032,12 @@ class LC3UnitTestCase(unittest.TestCase):
             or if the provided label does not exist.
         """
         
-        if self.exec_props is None or self.exec_props[0] != _ExecType.CALL_SUBROUTINE or self.call_trace_list is None:
+        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.call_trace_list is None:
             raise InternalArgError(
                 "self.assertSubroutineCalled can only be called after self.callSubroutine."
             )
         
-        caller = self.exec_props[1]
+        caller = self.exec_props.label
         callee_addr = self._lookup(label)
 
         msg = _nonnull_or_default(msg_fmt, "Subroutine {} did not call {}").format(repr(caller), repr(label))
