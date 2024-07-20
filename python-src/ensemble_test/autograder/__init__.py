@@ -5,6 +5,7 @@ from collections.abc import Iterable
 import dataclasses
 import itertools
 from pathlib import Path
+import traceback
 import typing
 from .. import core
 import unittest
@@ -391,7 +392,17 @@ class LC3UnitTestCase(unittest.TestCase):
         fp : str
             the file path to load from
         """
-        self.source_code = Path(fp)
+        # pytest by default resolves relative paths from the directory of execution
+        # however, we should use the directory of test so we don't crash by being in a different directory
+        
+        # file path of test
+        testFp = Path(traceback.extract_stack()[-2].filename)
+        # directory of test
+        testDir = testFp.parent
+        # resource as resolved from the test directory
+        resourceFp = testDir / fp
+
+        self.source_code = resourceFp
         self._load_from_src()
     
     def loadCode(self, src: str):
