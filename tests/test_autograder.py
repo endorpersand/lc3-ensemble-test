@@ -1,7 +1,7 @@
 import unittest
 
 from ensemble_test import core
-from . import InternalArgError, LC3UnitTestCase, CallNode
+from ensemble_test.autograder import InternalArgError, LC3UnitTestCase, CallNode
 
 def _subroutine(name: str, inner: str):
     return f"""
@@ -214,7 +214,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.assertCondCode("n")
     
     def test_call_sr_standard_cc(self):
-        self.loadFile("test-asm/sumtorial-lc3cc.asm")
+        self.loadFile("sumtorial-lc3cc.asm")
         
 
         # assert callSubroutine errors if no defined SR
@@ -258,7 +258,7 @@ class TestLC3Sample(LC3UnitTestCase):
             self.assertReg(0, N * (N + 1) // 2)
 
     def test_call_sr_pass_by_register(self):
-        self.loadFile("test-asm/sumtorial-pbr.asm")
+        self.loadFile("sumtorial-pbr.asm")
 
         # ---------------------------------------------
         self.defineSubroutine("SUMTORIAL", {0: "n"}, ret=0)
@@ -296,7 +296,7 @@ class TestLC3Sample(LC3UnitTestCase):
             self.assertReg(0, N * (N + 1) // 2)
     
     def test_call_sr_standard_cc_other(self):
-        self.loadFile("test-asm/double-quad-lc3cc.asm")
+        self.loadFile("double-quad-lc3cc.asm")
 
         # ---------------------------------------------
         self.defineSubroutine("DOUBLE", ["n"])
@@ -327,7 +327,7 @@ class TestLC3Sample(LC3UnitTestCase):
             self.assertReg(0, 4 * N)
 
     def test_assert_subroutine_utils(self):
-        self.loadFile("test-asm/sumtorial-lc3cc.asm")
+        self.loadFile("sumtorial-lc3cc.asm")
         
         self.defineSubroutine("SUMTORIAL", ["n"])
         self.callSubroutine("SUMTORIAL", [5])
@@ -337,7 +337,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.assertSubroutineCalled("SUMTORIAL")
 
     # def test_stack_frame(self):
-    #     self.loadFile("test-asm/xy-lc3cc.asm")
+    #     self.loadFile("xy-lc3cc.asm")
 
     #     self.defineSubroutine("X", ["n"])
     #     self.defineSubroutine("Y", ["n"])
