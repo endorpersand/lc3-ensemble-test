@@ -6,7 +6,7 @@ import dataclasses
 import itertools
 from pathlib import Path
 import traceback
-import typing
+from typing import List, Literal, NamedTuple, Optional, Union
 from .. import core
 import unittest
 
@@ -35,7 +35,7 @@ class InternalArgError(Exception):
     def __str__(self):
         return f"{super().__str__()}\n[This error should not occur. If you see this on Gradescope, contact a TA.]"
 
-def _verify_ascii_string(string: str, *, arg_desc: str | None = None) -> bytes:
+def _verify_ascii_string(string: str, *, arg_desc: Optional[str] = None) -> bytes:
     try:
         bstring = string.encode("ascii")
     except UnicodeEncodeError:
@@ -53,7 +53,7 @@ def _verify_reg_no(reg_no: int):
 
 def _simple_assert_msg(msg, expected, actual):
     return (
-        f"{msg if msg is not None else ""}\n"
+        f"{msg if msg is not None else ''}\n"
         f"expected: {expected}\n"
         f"actual:   {actual}"
     )
@@ -65,30 +65,30 @@ def _nonnull_or_default(value, default):
 class CallNode:
     frame_no: int
     callee: int
-    args: list[int]
-    ret: int | None = None
-CallTraceList = list[CallNode]
+    args: "list[int]"
+    ret: Optional[int] = None
+CallTraceList = List[CallNode]
 
-class _ExecRunCode(typing.NamedTuple):
+class _ExecRunCode(NamedTuple):
     max_instrs_run: int
-class _ExecCallSubroutine(typing.NamedTuple):
+class _ExecCallSubroutine(NamedTuple):
     label: str
-    args: list[int]
+    args: "list[int]"
     R6: int
     PC: int
     max_instrs_run: int
-_ExecProperties = _ExecRunCode | _ExecCallSubroutine
+_ExecProperties = Union[_ExecRunCode, _ExecCallSubroutine]
 
-MemLocation: typing.TypeAlias = "str | int | _LocatedInt"
-class _IOriginRegister(typing.NamedTuple):
+MemLocation = Union[str, int, "_LocatedInt"]
+class _IOriginRegister(NamedTuple):
     # Item's origin (address) is Rx + offset
     reg_no: int
     offset: int
-class _IOriginIndirect(typing.NamedTuple):
+class _IOriginIndirect(NamedTuple):
     # Item's origin (address) is mem[inner] + offset
     inner: MemLocation
     offset: int
-_IOrigin = _IOriginRegister | _IOriginIndirect
+_IOrigin = Union[_IOriginRegister, _IOriginIndirect]
 
 class _LocatedInt(int):
     """
@@ -118,20 +118,20 @@ class _LocatedInt(int):
     are input into a location parameter of a write* or assert* function. Any other operations
     (e.g., multiplication) will erase the origin.
     """
-    _origin: _IOrigin | None
-    def __new__(cls, value: int, *, origin: _IOrigin | None): 
+    _origin: Optional[_IOrigin]
+    def __new__(cls, value: int, *, origin: Optional[_IOrigin]): 
         o = super().__new__(cls, value)
         o._origin = origin
         return o
     
-    def _new_origin(self, offset: int) -> _IOrigin | None:
+    def _new_origin(self, offset: int) -> Optional[_IOrigin]:
         if self._origin is None: return None
         (*rest, current_off) = self._origin
         return self._origin.__class__(*rest, current_off + offset) # type: ignore
     
-    def __add__(self, other: int) -> typing.Self:
+    def __add__(self, other: int):
         return self.__class__(super().__add__(other), origin=self._new_origin(other))
-    def __sub__(self, other: int) -> typing.Self:
+    def __sub__(self, other: int):
         return self.__class__(super().__sub__(other), origin=self._new_origin(-other))
 
 def _get_loc_name(loc: MemLocation) -> str:
@@ -177,7 +177,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim = core.Simulator()
         # State of all 8 registers before execution.
         # If an execution has not yet occurred, this is None.
-        self.saved_registers: list[int] | None = None
+        self.saved_registers: Optional["list[int]"] = None
 
         ##### Preconditions
 
@@ -192,21 +192,21 @@ class LC3UnitTestCase(unittest.TestCase):
         # - If this is a `Path`, it comes from some local file.
         # - If this is a `str`, it comes from inline code.
         # - If this is `None`, it has not yet been declared.
-        self.source_code: Path | str | None = None
+        self.source_code: Union[Path, str, None] = None
 
         ##### Execution
 
         # The execution type.
         # If this is None, then no execution has occurred.
-        self.exec_props: _ExecProperties | None = None
+        self.exec_props: Optional[_ExecProperties] = None
 
         # If execution was a subroutine call,
         # this holds the return trace from that call.
-        self.call_trace_list: CallTraceList | None = None
+        self.call_trace_list: Optional[CallTraceList] = None
     
     ##### HELPERS #####
 
-    def _readContiguous(self, start_addr: int, length: int | None = None):
+    def _readContiguous(self, start_addr: int, length: Optional[int] = None):
         """
         Returns an iterator which returns a contiguous range of elements in memory.
 
@@ -215,7 +215,7 @@ class LC3UnitTestCase(unittest.TestCase):
         ctr = itertools.count() if length is None else range(length)
         return (self.sim.read_mem(_to_u16(start_addr + i)) for i in ctr)
     
-    def _writeContiguous(self, start_addr: int, words: Iterable[int]):
+    def _writeContiguous(self, start_addr: int, words: "Iterable[int]"):
         """
         Writes the given words into a contiguous range of elements in memory.
 
@@ -293,7 +293,7 @@ class LC3UnitTestCase(unittest.TestCase):
         if self.source_code is None:
             raise InternalArgError("cannot execute, no code was loaded")
     
-    def _getReturnValue(self, callee: int) -> int | None:
+    def _getReturnValue(self, callee: int) -> Optional[int]:
         """
         Pulls the return value following a subroutine call.
         """
@@ -313,7 +313,7 @@ class LC3UnitTestCase(unittest.TestCase):
     def _assertShortEqual(
             self, 
             expected: int, actual: int, 
-            msg: str | None = None, *, 
+            msg: Optional[str] = None, *, 
             signed: bool = True, 
             show_hex: bool = True
         ):
@@ -355,7 +355,7 @@ class LC3UnitTestCase(unittest.TestCase):
     
     ##### PRECONDITIONS #####
 
-    def fillMachine(self, fill: core.MemoryFillType, value: int | None = None):
+    def fillMachine(self, fill: core.MemoryFillType, value: Optional[int] = None):
         """
         Resets the machine and configures how its memory and registers are filled.
 
@@ -465,7 +465,7 @@ class LC3UnitTestCase(unittest.TestCase):
         addr = self._resolveAddr(loc)
         self.sim.write_mem(addr, _to_u16(value))
     
-    def writeArray(self, loc: MemLocation, lst: list[int]):
+    def writeArray(self, loc: MemLocation, lst: "list[int]"):
         """
         Writes a contiguous sequence of memory values (an array) starting at the provided label location.
 
@@ -524,7 +524,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.input = inp
 
 
-    def defineSubroutine(self, loc: MemLocation, params: list[str] | dict[int, str], ret: int | None = None):
+    def defineSubroutine(self, loc: MemLocation, params: Union["list[str]", "dict[int, str]"], ret: Optional[int] = None):
         """
         Defines a subroutine signature to be called in `self.callSubroutine`.
 
@@ -581,7 +581,7 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.run(max_instrs_run)
 
 
-    def callSubroutine(self, label: str, args: list[int], R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> CallTraceList:
+    def callSubroutine(self, label: str, args: "list[int]", R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> CallTraceList:
         """
         Calls a subroutine with the provided arguments.
 
@@ -655,8 +655,8 @@ class LC3UnitTestCase(unittest.TestCase):
         self.exec_props = _ExecCallSubroutine(label, args, R6, PC, max_instrs_run)
         self.sim.call_subroutine(addr)
         
-        path: list[CallNode] = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
-        curr_path: list[CallNode] = [*path]
+        path: "list[CallNode]" = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
+        curr_path: "list[CallNode]" = [*path]
 
         start = self.sim.instructions_run
         while self.sim.frame_number >= path[0].frame_no and not self.sim.hit_halt() and self.sim.instructions_run - start < max_instrs_run:
@@ -694,12 +694,12 @@ class LC3UnitTestCase(unittest.TestCase):
             self.sim.r6 += len(args) + 1
 
         # TODO: better interface than list[CallNode]
-        self.call_trace_list = CallTraceList(path)
+        self.call_trace_list = list(path)
         return self.call_trace_list
     
     ##### ASSERTIONS #####
 
-    def assertReg(self, reg_no: int, expected: int, msg_fmt: str | None = None):
+    def assertReg(self, reg_no: int, expected: int, msg_fmt: Optional[str] = None):
         """
         Asserts the value at the provided register number matches the expected value.
 
@@ -719,7 +719,7 @@ class LC3UnitTestCase(unittest.TestCase):
         msg = _nonnull_or_default(msg_fmt, "Incorrect value for register {}").format(reg_no)
         self._assertShortEqual(expected, actual, msg)
     
-    def assertMemValue(self, loc: MemLocation, expected: int, msg_fmt: str | None = None):
+    def assertMemValue(self, loc: MemLocation, expected: int, msg_fmt: Optional[str] = None):
         """
         Asserts the value at the provided label matches the expected value.
 
@@ -739,7 +739,7 @@ class LC3UnitTestCase(unittest.TestCase):
         msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(_get_loc_name(loc))
         self._assertShortEqual(expected, actual, msg)
 
-    def assertArray(self, loc: MemLocation, arr: list[int], msg_fmt: str | None = None):
+    def assertArray(self, loc: MemLocation, arr: "list[int]", msg_fmt: Optional[str] = None):
         """
         Asserts the sequence of values (array) at the provided label matches the expected array of values.
 
@@ -812,7 +812,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 )
             )
     
-    def assertOutput(self, expected: str, msg: str | None = None):
+    def assertOutput(self, expected: str, msg: Optional[str] = None):
         """
         Assert the current output string matches the expected string.
 
@@ -838,7 +838,7 @@ class LC3UnitTestCase(unittest.TestCase):
             )
         )
 
-    def assertPC(self, expected: int, msg: str | None = None):
+    def assertPC(self, expected: int, msg: Optional[str] = None):
         """
         Assert the PC matches the expected value.
 
@@ -854,13 +854,13 @@ class LC3UnitTestCase(unittest.TestCase):
             signed = False
         )
     
-    def assertCondCode(self, expected: typing.Literal["n", "z", "p"], msg_fmt: str | None = None):
+    def assertCondCode(self, expected: Literal["n", "z", "p"], msg_fmt: Optional[str] = None):
         """
         Assert the condition code matches the expected condition code.
 
         Parameters
         ----------
-        expected : typing.Literal["n", "z", "p"]
+        expected : Literal["n", "z", "p"]
             The expected condition code.
         msg_fmt: str, optional
             A custom message to print if the assertion fails.
@@ -886,7 +886,7 @@ class LC3UnitTestCase(unittest.TestCase):
         msg = _nonnull_or_default(msg_fmt, "Incorrect condition code (expected {}, got {})").format(repr(expected), repr(actual))
         self.assertEqual(expected, actual, msg)
     
-    def assertRegsPreserved(self, regs: list[int] | None = None, msg_fmt: str | None = None):
+    def assertRegsPreserved(self, regs: Optional["list[int]"] = None, msg_fmt: Optional[str] = None):
         """
         Asserts the values of the given registers are unchanged after an execution.
 
@@ -939,7 +939,7 @@ class LC3UnitTestCase(unittest.TestCase):
         if final_sp > orig_sp:
             self.fail(f"Stack was not managed properly for subroutine {self.exec_props.label!r}: there were fewer items remaining in the stack than expected")
         
-    def assertHalted(self, msg: str | None = None):
+    def assertHalted(self, msg: Optional[str] = None):
         """
         Asserts that the program halted correctly.
         
@@ -962,7 +962,7 @@ class LC3UnitTestCase(unittest.TestCase):
         if not self.sim.hit_halt():
             self.fail(_nonnull_or_default(msg, "Program did not halt correctly"))
     
-    def assertReturned(self, msg: str | None = None):
+    def assertReturned(self, msg: Optional[str] = None):
         """
         Asserts that the execution returned correctly.
         
@@ -984,7 +984,7 @@ class LC3UnitTestCase(unittest.TestCase):
         
         self.assertPC(self.sim.r7, _nonnull_or_default(msg, "Subroutine did not return properly"))
     
-    def assertReturnValue(self, expected: int, msg: str | None = None):
+    def assertReturnValue(self, expected: int, msg: Optional[str] = None):
         """
         Asserts the return value of a subroutine call is correct.
 
@@ -1015,7 +1015,7 @@ class LC3UnitTestCase(unittest.TestCase):
         
         self._assertShortEqual(expected, actual, _nonnull_or_default(msg, "Incorrect return value"))
     
-    def assertSubroutineCalled(self, label: str, msg_fmt: str | None = None):
+    def assertSubroutineCalled(self, label: str, msg_fmt: Optional[str] = None):
         """
         Asserts that a subroutine call correctly called another subroutine.
         
