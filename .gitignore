@@ -1,6 +1,5 @@
 /target
 .env
-.github
 
 # prevent report from appearing when calling "pytest --html=report.html --self-contained-html"
 report.html
