@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use lc3_ensemble::asm::{assemble_debug, ObjectFile};
-use lc3_ensemble::ast::reg_consts::{R0, R1, R2, R3, R4, R5, R6, R7};
+use lc3_ensemble::ast::Reg::{R0, R1, R2, R3, R4, R5, R6, R7};
 use lc3_ensemble::ast::Reg;
 use lc3_ensemble::parse::parse_ast;
 use lc3_ensemble::sim::debug::Breakpoint;
