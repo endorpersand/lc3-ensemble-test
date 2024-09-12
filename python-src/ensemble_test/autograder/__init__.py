@@ -1128,7 +1128,7 @@ class LC3UnitTestCase(unittest.TestCase):
         )
         if not matching_call: self.fail(msg)
 
-    def assertSubroutinesCalledInOrder(self, *calls: "str | tuple[str, list[int] | None]"):
+    def assertSubroutinesCalledInOrder(self, calls: "list[str | tuple[str, list[int] | None]]"):
         """
         Asserts that a subroutine call correctly calls a given list of subroutines in order.
 
@@ -1178,7 +1178,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
         Parameters
         ----------
-        calls : str | tuple[str, list[int] | None]...
+        calls : list[str | tuple[str, list[int] | None]]
             The list of subroutine calls.
 
             Each call can either be:
