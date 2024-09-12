@@ -336,18 +336,6 @@ class TestLC3Sample(LC3UnitTestCase):
         self.assertReturnValue(15)
         self.assertSubroutineCalled("SUMTORIAL")
 
-    # def test_stack_frame(self):
-    #     self.loadFile("xy-lc3cc.asm")
-
-    #     self.defineSubroutine("X", ["n"])
-    #     self.defineSubroutine("Y", ["n"])
-    #     try:
-    #         self.runCode()
-    #     except core.SimError as e:
-    #         self._printStackFrame()
-    #         self.fail(e)
-    #     self.assertReg(0, 2)
-    
     def test_halt(self):
         # halting program
         self.loadCode("""
@@ -375,6 +363,84 @@ class TestLC3Sample(LC3UnitTestCase):
         with self.assertRaises(AssertionError) as e:
             self.assertHalted()
             self.assertIn("halt", str(e.exception))
+
+    def test_halt_fail_deeply_recursive(self):
+        code = f"""
+            .orig x3000
+            LD R6, SP
+            JSR FOO
+            HALT
+            SP .fill x6666
+
+            {_subroutine("FOO", '''
+                ;; call BAR(0)
+                AND R0, R0, #0
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR BAR
+            ''')}
+            {_subroutine("BAR", '''
+                ;; call BAZ(1)
+                AND R0, R0, #0
+                ADD R0, R0, #1
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR BAZ
+            ''')}
+            {_subroutine("BAZ", '''
+                ;; call QUX(2)
+                AND R0, R0, #0
+                ADD R0, R0, #2
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR QUX
+            ''')}
+            {_subroutine("QUX", '''
+                ADD R0, R0, #0
+                LOOP BR LOOP
+            ''')}
+
+            .end
+        """
+
+        # Stack trace in assertHalted
+        self.loadCode(code)
+        self.defineSubroutine("FOO", [])
+        self.defineSubroutine("BAR", ["arg"])
+        self.defineSubroutine("BAZ", ["arg"])
+        self.defineSubroutine("QUX", ["arg"])
+
+        self.runCode()
+        with self.assertRaises(AssertionError) as e:
+            self.assertHalted()
+            self.assertIn("Stack trace", str(e.exception))
+            self.assertIn("FOO()", str(e.exception))
+            self.assertIn("BAR(arg=0)", str(e.exception))
+            self.assertIn("BAZ(arg=1)", str(e.exception))
+            self.assertIn("QUX(arg=2)", str(e.exception))
+        pass
+
+        # Stack trace in assertReturned
+        self.loadCode(code)
+        self.defineSubroutine("FOO", [])
+        self.defineSubroutine("BAR", ["arg"])
+        self.defineSubroutine("BAZ", ["arg"])
+        self.defineSubroutine("QUX", ["arg"])
+
+        self.callSubroutine("FOO", [])
+        self.assertReturned()
+        self.assertIn("Stack trace", str(e.exception))
+        self.assertIn("FOO()", str(e.exception))
+        self.assertIn("BAR(arg=0)", str(e.exception))
+        self.assertIn("BAZ(arg=1)", str(e.exception))
+        self.assertIn("QUX(arg=2)", str(e.exception))
+
+    # def test_stack_overflow(self):
+    #     self.loadCode(f"""
+    #         .orig x3000
+    #         {_subroutine("FOO", "JSR FOO")}
+    #         .end
+    #     """)
 
     def test_regs_preserved(self):
         self.loadCode("""

@@ -53,7 +53,7 @@ def _verify_reg_no(reg_no: int):
 
 def _simple_assert_msg(msg, expected, actual):
     return (
-        f"{msg if msg is not None else ''}\n"
+        f"{_nonnull_or_default(msg, '')}\n"
         f"expected: {expected}\n"
         f"actual:   {actual}"
     )
@@ -254,27 +254,41 @@ class LC3UnitTestCase(unittest.TestCase):
         else:
             raise ValueError(f"Cannot resolve location of type {type(loc)} into an address")
 
-    def _printStackFrame(self):
-        stack = self.sim.frames or []
-        for i, frame in enumerate(stack):
-            name = self.sim.reverse_lookup(frame.callee_addr) or f"x{frame.callee_addr:04X}"
-            defn = self.sim.get_subroutine_def(frame.callee_addr)
-            fp = frame.frame_ptr and frame.frame_ptr[0]
-            r7 = self.sim.get_mem(fp + 2) if fp is not None else None
+    def _formatFrame(self, frame: core.Frame) -> str:
+        name = self.sim.reverse_lookup(frame.callee_addr) or f"x{frame.callee_addr:04X}"
+        defn = self.sim.get_subroutine_def(frame.callee_addr)
+        fp = frame.frame_ptr and frame.frame_ptr[0] # frame.frame_ptr?.[0]
+        r7 = self.sim.get_mem(fp + 2) if fp is not None else None
 
-            fp_str = f"x{fp:04X}" if fp is not None else "?"
-            r7_str = f"x{r7:04X}" if r7 is not None else "?"
+        fp_str = f"x{fp:04X}" if fp is not None else "?"
+        r7_str = f"x{r7:04X}" if r7 is not None else "?"
 
-            if defn is not None:
-                if isinstance(defn, core.CallingConventionSRDef):
-                    args = ', '.join(f"{p}={a}" for p, (a, _) in zip(defn.params, frame.arguments))
-                elif isinstance(defn, core.PassByRegisterSRDef):
-                    args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn.params, frame.arguments))
-                else:
-                    raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {type(defn)}")
+        if defn is not None:
+            if isinstance(defn, core.CallingConventionSRDef):
+                args = ', '.join(f"{p}={a}" for p, (a, _) in zip(defn.params, frame.arguments))
+            elif isinstance(defn, core.PassByRegisterSRDef):
+                args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn.params, frame.arguments))
             else:
-                args = "?"
-            print(f"{' ' * (i * 2)}{name}({args}): fp={fp_str}, r7={r7_str}")
+                raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {type(defn)}")
+        else:
+            args = "?"
+
+        return f"{name}({args}): fp={fp_str}, r7={r7_str}"
+    
+    def _formatFrameStack(self, frames: list[core.Frame] | None = None) -> str:
+        frames = self.sim.frames if frames is None else frames
+        if not frames: return ""
+
+        lines = [
+            "",
+            "",
+            "Stack trace:"
+        ]
+        lines.append("  " + self._formatFrame(frames[-1]))
+        for f in reversed(frames[:-1]):
+            lines.append("  from " + self._formatFrame(f))
+        
+        return "\n".join(lines)
 
     def _load_from_src(self):
         """Loads from `self.source_code`, if present"""
@@ -343,18 +357,19 @@ class LC3UnitTestCase(unittest.TestCase):
         expected_n = expected_i if signed else expected_u
         actual_n = actual_i if signed else actual_u
 
-        # create expected_str and actual_str, with format:
-        #  expected:      0 (x0000)
-        #  actual:   -29824 (x8B80)
-        expected_str, actual_str = str(expected_n), str(actual_n)
-        pad = max(len(expected_str), len(actual_str))
-        expected_str, actual_str = expected_str.rjust(pad), actual_str.rjust(pad)
-        if show_hex:
-            expected_str += f" (x{expected_u:04X})"
-            actual_str += f" (x{actual_u:04X})"
-        
-        # create msg and assert:
-        msg = _simple_assert_msg(msg or "Shorts not equal", expected_str, actual_str)
+        msg = msg or "Shorts not equal"
+        if self.longMessage:
+            # create expected_str and actual_str, with format:
+            #  expected:      0 (x0000)
+            #  actual:   -29824 (x8B80)
+            expected_str, actual_str = str(expected_n), str(actual_n)
+            pad = max(len(expected_str), len(actual_str))
+            expected_str, actual_str = expected_str.rjust(pad), actual_str.rjust(pad)
+            if show_hex:
+                expected_str += f" (x{expected_u:04X})"
+                actual_str += f" (x{actual_u:04X})"
+            msg = _simple_assert_msg(msg, expected_str, actual_str)
+
         self.assertEqual(expected_n, actual_n, msg)
     
     ##### PRECONDITIONS #####
@@ -625,7 +640,7 @@ class LC3UnitTestCase(unittest.TestCase):
         defn = self.sim.get_subroutine_def(addr)
         if defn is None:
             raise InternalArgError(
-                f"No definition provided for subroutine {label.upper()!r}."
+                f"No definition provided for subroutine {label.upper()!r}. "
                 "Provide one with self.defineSubroutine."
             )
 
@@ -966,7 +981,8 @@ class LC3UnitTestCase(unittest.TestCase):
             )
         
         if not self.sim.hit_halt():
-            self.fail(_nonnull_or_default(msg, "Program did not halt correctly"))
+            msg = _nonnull_or_default(msg, "Program did not halt correctly") + self._formatFrameStack()
+            self.fail(msg)
     
     def assertReturned(self, msg: Optional[str] = None):
         """
@@ -988,7 +1004,10 @@ class LC3UnitTestCase(unittest.TestCase):
                 "If you meant to check if the subroutine halted, use self.assertHalted."
             )
         
-        self.assertPC(self.sim.r7, _nonnull_or_default(msg, "Subroutine did not return properly"))
+        msg = _nonnull_or_default(msg, "Subroutine did not return correctly") + self._formatFrameStack()
+        self.longMessage = False
+        self.assertPC(self.sim.r7, msg)
+        self.longMessage = True
     
     def assertReturnValue(self, expected: int, msg: Optional[str] = None):
         """
