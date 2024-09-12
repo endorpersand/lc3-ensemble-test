@@ -61,6 +61,10 @@ def _simple_assert_msg(msg, expected, actual):
 def _nonnull_or_default(value, default):
     return value if value is not None else default
 
+def _format_call(label: str, args: list[int] | None):
+    args_str = ", ".join(str(a) for a in args) if args is not None else "..."
+    return f"{label}({args_str})"
+
 @dataclasses.dataclass
 class CallNode:
     frame_no: int
@@ -585,7 +589,8 @@ class LC3UnitTestCase(unittest.TestCase):
         """
         Calls a subroutine with the provided arguments.
 
-        This loads the arguments into the LC-3 machine, executes the subroutine,
+        This loads the arguments into the LC-3 machine (using the definition of the subroutine
+        provided by defineSubroutine), executes the subroutine,
         and returns the resulting list of subroutine calls that occur as a result of this call.
 
         Parameters
@@ -666,7 +671,8 @@ class LC3UnitTestCase(unittest.TestCase):
             # we stepped into a subroutine
             if self.sim.frame_number > last_frame_no:
                 last_frame = self.sim.last_frame
-                if last_frame is None: raise InternalArgError("cannot compute CallNode without debug_frames")
+                if last_frame is None:
+                    raise InternalArgError("cannot compute CallNode without debug_frames")
                 
                 node = CallNode(
                     frame_no=self.sim.frame_number, 
@@ -1015,10 +1021,16 @@ class LC3UnitTestCase(unittest.TestCase):
         
         self._assertShortEqual(expected, actual, _nonnull_or_default(msg, "Incorrect return value"))
     
-    def assertSubroutineCalled(self, label: str, msg_fmt: Optional[str] = None):
+    def assertSubroutineCalled(
+            self, 
+            label: str, 
+            args: "list[int] | None" = None, *,
+            directly_called: bool = True,
+            msg_fmt: Optional[str] = None
+    ):
         """
         Asserts that a subroutine call correctly called another subroutine.
-        
+
         For example, if a helper subroutine `"BAR"` is expected to be used in subroutine `"FOO"`,
         this could be done by producing:
         ```py
@@ -1026,11 +1038,43 @@ class LC3UnitTestCase(unittest.TestCase):
             self.assertSubroutineCalled("BAR")
         ```
 
+        If we want to assert a specific argument was called, we can do that as well:
+        ```py
+            # FOO(N) must call BAR(N).
+            self.callSubroutine("FOO", [ N ])
+            self.assertSubroutineCalled("BAR", [ N ])
+        ```
+
+        Note that by default, `assertSubroutineCalled` requires that the top-level of 
+        the original subroutine call calls the expected callee. 
+        If you wish to require that a given subroutine is called *at all* during a
+        subroutine's execution, set the argument `directly_called` to `False`.
+        ```
+        FOO:
+            JSR BAR ;; BAR is directly called by FOO
+            RET
+        
+        FOO2:
+            JSR BAR2 ;; BAR2 is directly called by FOO2
+            RET
+        BAR2:
+            JSR BAZ ;; BAZ is directly called by BAR2, indirectly called by FOO2
+            RET
+        BAZ:
+            RET
+        ```
+
         Parameters
         ----------
         label : str
             Name/label of the subroutine that we expect to have been called.
-        msg_fmt : str | None, optional
+        args : list[int] | None, optional
+            Exact list of arguments to require this subroutine was called with.
+            If None (default), any set of arguments is accepted.
+        directly_called: bool, optional
+            Whether the subroutine has to be directly called 
+            in the top-level of the original subroutine call, by default True
+        msg_fmt : Optional[str], optional
             A custom message to print if the assertion fails.
             {0}, {1} represent the name of the subroutine called and the expected subroutine to be called respectively.
 
@@ -1050,5 +1094,119 @@ class LC3UnitTestCase(unittest.TestCase):
         callee_addr = self._lookup(label)
 
         msg = _nonnull_or_default(msg_fmt, "Subroutine {} did not call {}").format(repr(caller), repr(label))
-        if not any(c.callee == callee_addr for c in self.call_trace_list[1:]):
-            self.fail(msg)
+
+        # Find a subroutine call which has:
+        # - the right frame number (if directly_called, then original call + 1, else any)
+        # - the right subroutine name
+        # - the right arguments (if args is not None, then args, else any)
+        call_frame = self.call_trace_list[0].frame_no + 1
+        def correct_frame_no(c: CallNode): return not directly_called or c.frame_no == call_frame
+        def correct_address(c: CallNode): return c.callee == callee_addr
+        def correct_arguments(c: CallNode): return args is None or c.args == args
+        matching_call = any(
+            correct_frame_no(c) and correct_address(c) and correct_arguments(c) 
+            for c in self.call_trace_list[1:]
+        )
+        if not matching_call: self.fail(msg)
+
+    def assertSubroutinesCalledInOrder(self, *calls: "str | tuple[str, list[int] | None]"):
+        """
+        Asserts that a subroutine call correctly calls a given list of subroutines in order.
+
+        For example, given the pseudocode:
+        ```
+        FOO:
+            JSR PRINT, 0
+            JSR BAR
+            JSR PRINT, 4
+            RET
+        BAR:
+            JSR PRINT, 1
+            JSR BAZ
+            JSR PRINT, 3
+            RET
+        BAZ:
+            JSR PRINT, 2
+            RET
+        ```
+
+        This call order can be asserted with:
+        ```py
+        self.callSubroutine("FOO", [ ... ])
+        self.assertSubroutinesCalledInOrder(
+            "FOO", 
+            ("PRINT", [0]),
+            "BAR",
+            ("PRINT", [1]),
+            "BAZ",
+            ("PRINT", [2]),
+            ("PRINT", [3]),
+            ("PRINT", [4]),
+        )
+        ```
+
+        Or if we only want to assert the `PRINT` calls:
+        ```py
+        self.callSubroutine("FOO", [ ... ])
+        self.assertSubroutinesCalledInOrder(
+            ("PRINT", [0]),
+            ("PRINT", [1]),
+            ("PRINT", [2]),
+            ("PRINT", [3]),
+            ("PRINT", [4]),
+        )
+        ```
+
+        Parameters
+        ----------
+        calls : str | tuple[str, list[int] | None]...
+            The list of subroutine calls.
+
+            Each call can either be:
+            - `str` (representing an assertion that a subroutine was called, but ignoring arguments)
+            - `tuple[str, list[int]]` (representing an assertion that a subroutine was called with specific arguments)
+            - `tuple[str, None]` (equivalent to `str` case)
+
+        Raises
+        ------
+        InternalArgError
+            If a call to this function wasn't preceded by a self.callSubroutine execution,
+            or if the provided labels (for each call) do not exist, or an invalid call type was given.
+        """
+
+        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.call_trace_list is None:
+            raise InternalArgError(
+                "self.assertSubroutineCalled can only be called after self.callSubroutine."
+            )
+        
+        # Parse calls into (callee name, callee addr, argument)
+        _calls: "list[tuple[str, int, list[int] | None]]" = []
+        for c in calls:
+            if isinstance(c, str):
+                _calls.append((c, self._lookup(c), None))
+            elif isinstance(c, tuple):
+                label, args = c
+                _calls.append((label, self._lookup(label), args))
+            else:
+                raise InternalArgError(
+                    f"assertSubroutinesCalledInOrder given argument {c}, which does not match the call type format"
+                )
+        
+        trace_iter = iter(self.call_trace_list)
+        for i, (callee_label, callee_addr, args) in enumerate(_calls):
+            # Find next call in trace that matches the provided call parameters
+            try:
+                next(filter(
+                    lambda c: c.callee == callee_addr and (args is None or c.args == args), 
+                    trace_iter
+                ))
+            except StopIteration:
+                # Fail if not found
+                found_str = ", ".join(_format_call(label, args) for (label, _, args) in _calls[:i])
+                missing_str = _format_call(callee_label, args)
+                msg = (
+                    "Subroutines were not called in order. "
+                    f"After calls [{found_str}], "
+                    f"{missing_str} should have been called."
+                )
+                self.fail(msg)
