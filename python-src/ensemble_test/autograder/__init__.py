@@ -176,6 +176,15 @@ def _get_loc_name(loc: MemLocation) -> str:
     else:
         raise ValueError(f"cannot find name of location of type {type(loc)}")
 
+def parameterized_name(testcase_fn, param_num, param):
+    from parameterized import parameterized
+    return "{}_{}".format(
+        testcase_fn.__name__,
+        parameterized.to_safe_name("_".join(str(x) for x in param.args)),
+    )
+def parameterized_doc(testcase_fn, param_num, param):
+    return testcase_fn.__doc__ and testcase_fn.__doc__.format(*param.args)
+
 class LC3UnitTestCase(unittest.TestCase):
     def setUp(self):
         self.sim = core.Simulator()
