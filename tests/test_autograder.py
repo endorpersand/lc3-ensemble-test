@@ -14,7 +14,7 @@ def _subroutine(name: str, inner: str):
         ADD R6, R6, #-1
         STR R5, R6, #0
         ;; set R5 to FP
-        ADD R5, R6, #1
+        ADD R5, R6, #-1
         ;; push R0-R4
         ADD R6, R6, #-1
         STR R0, R6, #0
@@ -41,7 +41,7 @@ def _subroutine(name: str, inner: str):
         LDR R0, R6, #0
         ADD R6, R6, #1
         ;; pop local variables
-        ADD R6, R5, #-1
+        ADD R6, R5, #1
         ;; pop R5
         LDR R5, R6, #0
         ADD R6, R6, #1
