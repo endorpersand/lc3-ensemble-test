@@ -842,9 +842,41 @@ class LC3UnitTestCase(unittest.TestCase):
                 )
             )
     
+    def assertInput(self, expected: str, msg: Optional[str] = None):
+        """
+        Assert the current console input string matches the expected string.
+
+        Parameters
+        ----------
+        expected : str
+            The expected string
+        msg : Optional[str], optional
+            A custom message to print if the assertion fails.
+        """
+        # There's technically nothing wrong with non-ASCII inputs for this method,
+        # and it could accept non-ASCII text if it wanted
+
+        # But just for consistency and too-lazy-to-verify-correctness,
+        # we'll just require it's ASCII
+        _verify_ascii_string(expected, arg_desc=f"expected string parameter ({expected=!r})")
+        actual = self.sim.input
+
+        if len(expected) == 0:
+            default_msg = "Expected console input to be empty"
+        else:
+            default_msg = "Console input did not match expected"
+        
+        self.assertEqual(expected, actual,
+            _simple_assert_msg(
+                _nonnull_or_default(msg, default_msg),
+                expected, 
+                actual
+            )
+        )
+
     def assertOutput(self, expected: str, msg: Optional[str] = None):
         """
-        Assert the current output string matches the expected string.
+        Assert the current console output string matches the expected string.
 
         Parameters
         ----------
