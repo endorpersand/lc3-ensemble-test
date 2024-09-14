@@ -385,7 +385,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def fillMachine(self, fill: core.MemoryFillType, value: Optional[int] = None):
         """
-        Resets the machine and configures how its memory and registers are filled.
+        Resets the machine, wiping any previously loaded object file, and fills the memory and registers.
 
         Parameters
         ----------
@@ -481,7 +481,7 @@ class LC3UnitTestCase(unittest.TestCase):
     
     def writeMemValue(self, loc: MemLocation, value: int):
         """
-        Writes a memory value into the provided label location.
+        Writes a memory value into the provided memory location.
 
         Parameters
         ----------
@@ -495,7 +495,7 @@ class LC3UnitTestCase(unittest.TestCase):
     
     def writeArray(self, loc: MemLocation, lst: "list[int]"):
         """
-        Writes a contiguous sequence of memory values (an array) starting at the provided label location.
+        Writes a contiguous sequence of memory values (an array) starting at the provided memory location.
 
         Parameters
         ----------
@@ -509,7 +509,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def writeString(self, loc: MemLocation, string: str):
         """
-        Writes a null-terminated string into memory starting at the provided label location.
+        Writes a null-terminated string into memory starting at the provided memory location.
 
         Parameters
         ----------
@@ -541,7 +541,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def setInput(self, inp: str):
         """
-        Sets the current input string.
+        Sets the keyboard input to a given string.
 
         Parameters
         ----------
@@ -751,7 +751,7 @@ class LC3UnitTestCase(unittest.TestCase):
     
     def assertMemValue(self, loc: MemLocation, expected: int, msg_fmt: Optional[str] = None):
         """
-        Asserts the value at the provided label matches the expected value.
+        Asserts the value at the provided memory location matches the expected value.
 
         Parameters
         ----------
@@ -771,7 +771,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def assertArray(self, loc: MemLocation, arr: "list[int]", msg_fmt: Optional[str] = None):
         """
-        Asserts the sequence of values (array) at the provided label matches the expected array of values.
+        Asserts the sequence of values (array) at the provided memory location matches the expected array of values.
 
         Parameters
         ----------
@@ -793,7 +793,7 @@ class LC3UnitTestCase(unittest.TestCase):
 
     def assertString(self, loc: MemLocation, expected_str: str):
         """
-        Asserts the string at the provided label matches the expected string and correctly includes the null -terminator.
+        Asserts the string at the provided memory location matches the expected string and correctly includes the null -terminator.
 
         Parameters
         ----------
