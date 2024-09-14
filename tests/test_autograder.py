@@ -139,22 +139,22 @@ class TestLC3Sample(LC3UnitTestCase):
         # mismatch test
         with self.assertRaises(AssertionError) as e:
             self.assertString("BAD_STRINGY", "GOODBYE?")
-            self.assertIn("did not match expected", str(e.exception))
+        self.assertIn("did not match expected", str(e.exception))
 
         # mismatch test
         with self.assertRaises(AssertionError) as e:
             self.assertString("BAD_STRINGY", "GOOBYEEE")
-            self.assertIn("did not match expected", str(e.exception))
+        self.assertIn("did not match expected", str(e.exception))
 
         # early cut test
         with self.assertRaises(AssertionError) as e:
             self.assertString("BAD_STRINGY", "GOODBYE...?")
-            self.assertIn("shorter than expected", str(e.exception))
+        self.assertIn("shorter than expected", str(e.exception))
         
         # late cut test
         with self.assertRaises(AssertionError) as e:
             self.assertString("BAD_STRINGY", "GOOD")
-            self.assertIn("longer than expected", str(e.exception))
+        self.assertIn("longer than expected", str(e.exception))
         
 
     def test_output(self):
@@ -220,7 +220,7 @@ class TestLC3Sample(LC3UnitTestCase):
         # assert callSubroutine errors if no defined SR
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15])
-            self.assertIn("No definition provided", str(e.exception))
+        self.assertIn("No definition provided", str(e.exception))
 
         # ---------------------------------------------
         self.defineSubroutine("SUMTORIAL", ["n"])
@@ -228,10 +228,11 @@ class TestLC3Sample(LC3UnitTestCase):
         # assert callSubroutine errors if wrong number of arguments
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [])
-            self.assertIn("Number of arguments provided", str(e.exception))
+        self.assertIn("Number of arguments provided", str(e.exception))
+        
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
-            self.assertIn("Number of arguments provided", str(e.exception))
+        self.assertIn("Number of arguments provided", str(e.exception))
 
         # test callSubroutine success
         sumtorial_addr = self._lookup("SUMTORIAL")
@@ -266,10 +267,11 @@ class TestLC3Sample(LC3UnitTestCase):
         # assert callSubroutine errors if wrong number of arguments
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [])
-            self.assertIn("Number of arguments provided", str(e.exception))
+        self.assertIn("Number of arguments provided", str(e.exception))
+        
         with self.assertRaises(InternalArgError) as e:
             self.callSubroutine("SUMTORIAL", [15, 77, 99, 14])
-            self.assertIn("Number of arguments provided", str(e.exception))
+        self.assertIn("Number of arguments provided", str(e.exception))
 
         # test callSubroutine success
         sumtorial_addr = self._lookup("SUMTORIAL")
@@ -362,7 +364,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.runCode()
         with self.assertRaises(AssertionError) as e:
             self.assertHalted()
-            self.assertIn("halt", str(e.exception))
+        self.assertIn("halt", str(e.exception))
 
     def test_halt_fail_deeply_recursive(self):
         code = f"""
@@ -413,12 +415,11 @@ class TestLC3Sample(LC3UnitTestCase):
         self.runCode()
         with self.assertRaises(AssertionError) as e:
             self.assertHalted()
-            self.assertIn("Stack trace", str(e.exception))
-            self.assertIn("FOO()", str(e.exception))
-            self.assertIn("BAR(arg=0)", str(e.exception))
-            self.assertIn("BAZ(arg=1)", str(e.exception))
-            self.assertIn("QUX(arg=2)", str(e.exception))
-        pass
+        self.assertIn("Stack trace", str(e.exception))
+        self.assertIn("FOO()", str(e.exception))
+        self.assertIn("BAR(arg=0)", str(e.exception))
+        self.assertIn("BAZ(arg=1)", str(e.exception))
+        self.assertIn("QUX(arg=2)", str(e.exception))
 
         # Stack trace in assertReturned
         self.loadCode(code)
@@ -430,11 +431,11 @@ class TestLC3Sample(LC3UnitTestCase):
         self.callSubroutine("FOO", [])
         with self.assertRaises(AssertionError) as e:
             self.assertReturned()
-            self.assertIn("Stack trace", str(e.exception))
-            self.assertIn("FOO()", str(e.exception))
-            self.assertIn("BAR(arg=0)", str(e.exception))
-            self.assertIn("BAZ(arg=1)", str(e.exception))
-            self.assertIn("QUX(arg=2)", str(e.exception))
+        self.assertIn("Stack trace", str(e.exception))
+        self.assertIn("FOO()", str(e.exception))
+        self.assertIn("BAR(arg=0)", str(e.exception))
+        self.assertIn("BAZ(arg=1)", str(e.exception))
+        self.assertIn("QUX(arg=2)", str(e.exception))
 
     # def test_stack_overflow(self):
     #     self.loadCode(f"""
