@@ -808,33 +808,60 @@ class LC3UnitTestCase(unittest.TestCase):
         expected = [*expected_bytes, 0]
         actual = list(self._readContiguous(addr, len(expected)))
         
-        # Verify all (except last) elements are ASCII-compatible and not a null-terminator
+        # Verify all characters in string are ASCII
         for i, ch in enumerate(actual[:-1]):
-            if ch == 0:
-                actual_str = bytes(actual[:i]).decode("ascii") # ok because we checked beforehand
+            if ch == 0: break
+
+            if not (0 <= ch <= 127):
+                fail_str = bytes(actual[:i + 1]).decode("ascii", errors="replace") + "..."
+                fail_array = f"[{', '.join(str(c) for c in actual[:i + 1])}, ...]"
+                self.fail(f"Found invalid ASCII byte in string starting at mem[{loc_name}]: {fail_str} {fail_array}")
+
+        # Compare each string!
+        for e, a in zip(expected, actual):
+            if e == 0 and a == 0: break
+
+            # Actual string is longer than expected:
+            if e == 0:
+                # FORMAT:
+                #    AssertionError: String starting at mem[LABEL] longer than expected
+                #    expected: GOOD     [71, 79, 79, 68, 0]
+                #    actual:   GOODB... [71, 79, 79, 68, 66, ...]
+                actual_str = bytes(actual).decode("ascii")
+                actual_arr = f"[{', '.join(str(c) for c in actual)}, ...]"
+                self.fail(
+                    _simple_assert_msg(f"String starting at mem[{loc_name}] longer than expected", 
+                        f"{expected_str}     {expected}", 
+                        f"{actual_str}... {actual_arr}")
+                )
+                break
+            
+            # Actual string is shorter than expected
+            if a == 0:
+                # FORMAT:
+                #    AssertionError: String starting at mem[LABEL] shorter than expected
+                #    expected: GOODBYE!!! [71, 79, 79, 68, 66, 89, 69, 33, 33, 33, 0]
+                #    actual:   GOODBYE.   [71, 79, 79, 68, 66, 89, 69, 46, 0]
+                null_term = actual.index(0)
+                actual_str = (
+                    bytes(actual[:null_term])
+                        .decode("ascii")
+                        .ljust(len(expected_str))
+                )
+                actual_arr = actual[:null_term + 1]
                 self.fail(
                     _simple_assert_msg(f"String starting at mem[{loc_name}] shorter than expected",
                         f"{expected_str} {expected}",
-                        f"{actual_str.ljust(len(expected_str))} {actual}")
+                        f"{actual_str} {actual_arr}")
                 )
-            elif not (0 <= ch <= 127):
-                fail_array = f"[{', '.join(map(str, actual[:i + 1]))}, ...]"
-                self.fail(f"Found invalid ASCII byte in string starting at mem[{loc_name}]: {fail_array}")
-
-        # ok because we checked beforehand
-        # the actual string doesn't include the last element, so we omit it in any following print statements
-        actual_str = bytes(actual[:-1]).decode("ascii")
-
-        # Verify last element is the null-terminator
-        if actual[-1] != 0:
-            self.fail(
-                _simple_assert_msg(f"String starting at mem[{loc_name}] longer than expected", 
-                    f"{expected_str}    {expected}", 
-                    f"{actual_str}... {actual}")
-            )
-        
-        # Check for mismatches
-        for e, a in zip(expected, actual):
+                break
+            
+            # Check for mismatch
+            # FORMAT:
+            #    AssertionError: 63 != 46 : String starting at mem[LABEL] did not match expected
+            #    expected: GOODBYE? [71, 79, 79, 68, 66, 89, 69, 63, 0]
+            #    actual:   GOODBYE. [71, 79, 79, 68, 66, 89, 69, 46, 0]
+            actual_str = bytes(actual[:-1]).decode("ascii")
             self.assertEqual(e, a,
                 _simple_assert_msg(f"String starting at mem[{loc_name}] did not match expected", 
                     f"{expected_str} {expected}", 

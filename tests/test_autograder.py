@@ -120,6 +120,8 @@ class TestLC3Sample(LC3UnitTestCase):
             BAD_STRINGY:
                 .stringz "GOODBYE."
             WORSE_STRINGY:
+                .fill x48
+                .fill x45
                 .fill xF0
                 .fill x9F
                 .fill x98
@@ -144,6 +146,11 @@ class TestLC3Sample(LC3UnitTestCase):
         # mismatch test
         with self.assertRaises(AssertionError) as e:
             self.assertString("BAD_STRINGY", "GOOBYEEE")
+        self.assertIn("did not match expected", str(e.exception))
+
+        # mismatch test
+        with self.assertRaises(AssertionError) as e:
+            self.assertString("BAD_STRINGY", "GOOB")
         self.assertIn("did not match expected", str(e.exception))
 
         # early cut test
