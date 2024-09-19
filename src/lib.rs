@@ -1,16 +1,14 @@
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 
 use lc3_ensemble::asm::{assemble_debug, ObjectFile};
 use lc3_ensemble::ast::Reg::{R0, R1, R2, R3, R4, R5, R6, R7};
 use lc3_ensemble::ast::Reg;
 use lc3_ensemble::parse::parse_ast;
 use lc3_ensemble::sim::debug::Breakpoint;
+use lc3_ensemble::sim::device::{BufferedDisplay, BufferedKeyboard, Interrupt, InterruptFromFn};
 use lc3_ensemble::sim::frame::{Frame, ParameterList};
-use lc3_ensemble::sim::io::BufferedIO;
-use lc3_ensemble::sim::mem::{MachineInitStrategy, MemAccessCtx, Word};
-use lc3_ensemble::sim::{SimErr, SimFlags, Simulator};
+use lc3_ensemble::sim::mem::{MachineInitStrategy, Word};
+use lc3_ensemble::sim::{MemAccessCtx, SimErr, SimFlags, Simulator};
 use pyo3::types::PyInt;
 use pyo3::{create_exception, prelude::*};
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
@@ -224,8 +222,8 @@ impl PyFrame {
 struct PySimulator {
     sim: Simulator,
     obj: Option<ObjectFile>,
-    input: Arc<RwLock<VecDeque<u8>>>,
-    output: Arc<RwLock<Vec<u8>>>
+    input: BufferedKeyboard,
+    output: BufferedDisplay
 }
 
 impl PySimulator {
@@ -234,8 +232,8 @@ impl PySimulator {
 
         self.obj.take();
 
-        self.input.write().unwrap_or_else(|e| e.into_inner()).clear();
-        self.output.write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.input.get_buffer().write().unwrap_or_else(|e| e.into_inner()).clear();
+        self.output.get_buffer().write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     fn resolve_location(&self, loc: MemLocation) -> Result<u16, String> {
@@ -262,14 +260,16 @@ impl PySimulator {
         };
 
         // Set IO:
-        let io = BufferedIO::with_bufs(Arc::clone(&this.input), Arc::clone(&this.output));
-        this.sim.open_io(io);
+        this.sim.device_handler.set_keyboard(this.input.clone());
+        this.sim.device_handler.set_display(this.output.clone());
 
-        // Set check_signals interrupt:
-        // This allows the simulator to interrupt on a keyboard interrupt from the Python interface.
-        this.sim.add_external_interrupt(|_| {
+        let int_handler = InterruptFromFn::new(|| {
             Python::with_gil(|py| py.check_signals())
+                .err()
+                .map(Interrupt::external)
         });
+        this.sim.device_handler.add_device(int_handler, &[])
+            .unwrap_or_else(|_| panic!("Could not add interrupt handler device"));
 
         this.reset();
         this
@@ -389,7 +389,10 @@ impl PySimulator {
     /// This function also accepts optional `privileged` and `strict` parameters.
     /// These designate whether to read memory in privileged mode and with strict memory access.
     fn read_mem(&mut self, addr: u16, privileged: bool, strict: bool) -> PyResult<u16> {
-        let word = self.sim.mem.read(addr, MemAccessCtx { privileged, strict })
+        // Note: technically lc3-ensemble does accept non-effectful IO reads (vvvvvvvvvvvvvvvv)
+        // but it's not reaaally necessary for AG, so I am leaving it off of
+        // the Python binding unless something goes wrong down the line
+        let word = self.sim.read_mem(addr, MemAccessCtx { privileged, strict, io_effects: true })
             .map_err(|e| SimError::from_lc3_err(e, self.sim.prefetch_pc()))?;
 
         Ok(word.get())
@@ -409,7 +412,7 @@ impl PySimulator {
     /// This function also accepts optional `privileged` and `strict` parameters.
     /// These designate whether to write memory in privileged mode and with strict memory access.
     fn write_mem(&mut self, addr: u16, val: u16, privileged: bool, strict: bool) -> PyResult<()> {
-        self.sim.mem.write(addr, Word::new_init(val), MemAccessCtx { privileged, strict })
+        self.sim.write_mem(addr, Word::new_init(val), MemAccessCtx { privileged, strict, io_effects: true })
             .map_err(|e| SimError::from_lc3_err(e, self.sim.prefetch_pc()))
     }
 
@@ -418,14 +421,14 @@ impl PySimulator {
     /// This function does not activate any I/O devices (and therefore can result in incorrect I/O values).
     /// If you wish to trigger I/O devices, use `read_mem`.
     fn get_mem(&self, addr: u16) -> u16 {
-        self.sim.mem.get_raw(addr).get()
+        self.sim.mem[addr].get()
     }
     /// Sets a given value from memory without triggering I/O devices.
     /// 
     /// This function does not activate any I/O devices (and therefore can result in incorrect I/O values).
     /// If you wish to trigger I/O devices, use `write_mem`.
     fn set_mem(&mut self, addr: u16, val: u16) {
-        self.sim.mem.get_raw_mut(addr).set(val);
+        self.sim.mem[addr].set(val);
     }
 
     /// The value of register 0.
@@ -592,12 +595,12 @@ impl PySimulator {
 
     /// Configuration setting to designate whether to use real HALT or virtual HALT.
     #[getter]
-    fn get_use_real_halt(&self) -> bool {
-        self.sim.flags.use_real_halt
+    fn get_use_real_traps(&self) -> bool {
+        self.sim.flags.use_real_traps
     }
     #[setter]
-    fn set_use_real_halt(&mut self, status: bool) {
-        self.sim.flags.use_real_halt = status;
+    fn set_use_real_traps(&mut self, status: bool) {
+        self.sim.flags.use_real_traps = status;
     }
     
     /// Configuration setting to designate whether to use strict memory accesses during execution.
@@ -613,7 +616,8 @@ impl PySimulator {
     /// The I/O input.
     #[getter]
     fn get_input(&self) -> String {
-        let data: Vec<_> = self.input.read()
+        let data: Vec<_> = self.input.get_buffer()
+            .read()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
             .copied()
@@ -623,14 +627,16 @@ impl PySimulator {
     }
     #[setter]
     fn set_input(&mut self, input: &str) {
-        let mut inp = self.input.write()
+        let mut inp = self.input.get_buffer()
+            .write()
             .unwrap_or_else(|e| e.into_inner());
 
         inp.clear();
         inp.extend(input.as_bytes());
     }
     fn append_to_input(&mut self, input: &str) {
-        self.input.write()
+        self.input.get_buffer()
+            .write()
             .unwrap_or_else(|e| e.into_inner())
             .extend(input.as_bytes())
     }
@@ -639,13 +645,15 @@ impl PySimulator {
     #[getter]
     fn get_output(&self) -> String {
         String::from_utf8_lossy({
-            &self.output.read()
+            &self.output.get_buffer()
+                .read()
                 .unwrap_or_else(|e| e.into_inner())
         }).into_owned()
     }
     #[setter]
     fn set_output(&mut self, output: &str) {
-        let mut out = self.output.write()
+        let mut out = self.output.get_buffer()
+        .write()
         .unwrap_or_else(|e| e.into_inner());
 
         out.clear();
