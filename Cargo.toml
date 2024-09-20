@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 lc3-ensemble = "0.7.1"
-pyo3 = "0.21.2"
+pyo3 = "0.22"
 rand = "0.8.5"

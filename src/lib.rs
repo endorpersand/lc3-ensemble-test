@@ -87,8 +87,8 @@ enum MemLocation {
     Label(String)
 }
 
-#[derive(Clone, Copy)]
-#[pyclass(module="ensemble_test")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[pyclass(module="ensemble_test", eq, eq_int)]
 /// Strategies to fill the memory on initializing the simulator.
 enum MemoryFillType {
     /// Fill the memory with random values.
@@ -150,6 +150,7 @@ struct PassByRegisterSRDef {
 #[pymethods]
 impl PassByRegisterSRDef {
     #[new]
+    #[pyo3(signature=(params, ret = None))]
     fn constructor(params: Vec<(String, RegWrapper)>, ret: Option<RegWrapper>) -> Self {
         Self { params, ret }
     }
@@ -303,6 +304,7 @@ impl PySimulator {
     /// - `(MemoryFillType.Single, int)`  -> fill memory with the provided value
     /// 
     /// This method returns the seed/value that is used to initialize the simulator.
+    #[pyo3(signature=(fill, value = None))]
     fn init(&mut self, fill: MemoryFillType, value: Option<u64>) -> u64 {
         let (strat, ret_value) = match fill {
             MemoryFillType::Random => {
@@ -351,6 +353,7 @@ impl PySimulator {
     /// A `limit` parameter can be specified to limit the number of executions ran.
     /// 
     /// This can raise a [`SimError`] if an error occurs while simulating.
+    #[pyo3(signature=(limit = None))]
     fn run(&mut self, limit: Option<u64>) -> PyResult<()> {
         let result = if let Some(lim) = limit {
             self.sim.run_with_limit(lim)
@@ -385,6 +388,7 @@ impl PySimulator {
     /// Runs until a frame changes.
     /// 
     /// This is not meant for general use.
+    #[pyo3(signature=(stop = None))]
     fn _run_until_frame_change(&mut self, stop: Option<u64>) -> PyResult<()> {
         let frame = self.sim.frame_stack.len();
 
