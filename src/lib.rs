@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use lc3_ensemble::asm::{assemble_debug, ObjectFile};
+use lc3_ensemble::asm::{assemble_debug, ObjectFile, SourceInfo};
 use lc3_ensemble::ast::Reg::{R0, R1, R2, R3, R4, R5, R6, R7};
 use lc3_ensemble::ast::Reg;
 use lc3_ensemble::parse::parse_ast;
@@ -31,19 +31,38 @@ create_exception!(ensemble_test, LoadError, PyValueError);
 create_exception!(ensemble_test, SimError, PyValueError);
 
 impl LoadError {
-    fn from_lc3_err(e: impl lc3_ensemble::err::Error) -> PyErr {
-        struct ErrDisplay<'e, E>(&'e E);
+    fn from_lc3_err(e: impl lc3_ensemble::err::Error, src: &str) -> PyErr {
+        use std::ops::Range;
+
+        struct ErrDisplay<'e, E>(&'e E, &'e str);
         impl<E: lc3_ensemble::err::Error> std::fmt::Display for ErrDisplay<'_, E> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let src_info = SourceInfo::new(self.1);
+
                 std::fmt::Display::fmt(self.0, f)?;
                 if let Some(span) = self.0.span() {
-                    write!(f, "({span:?})")?;
+                    write!(f, " (")?;
+                    let mut it = span.iter().map(|&Range { start, end: _ }| src_info.get_pos_pair(start));
+                    if let Some((flno, fcno)) = it.next() {
+                        write!(f, "line {}, col {}", flno + 1, fcno + 1)?;
+                        for (lno, cno) in it {
+                            write!(f, "; line {}, col {}", lno + 1, cno + 1)?;
+                        }
+                    }
+                    writeln!(f, ")")?;
+                    
+                    for &Range { start, end: _ } in span.iter() {
+                        let (lno, _) = src_info.get_pos_pair(start);
+                        writeln!(f, "line {}:", lno + 1)?;
+                        writeln!(f, "  {}", src_info.read_line(lno).unwrap_or(""))?;
+
+                    }
                 }
                 Ok(())
             }
         }
         
-        LoadError::new_err(ErrDisplay(&e).to_string())
+        LoadError::new_err(ErrDisplay(&e, src).to_string())
     }
 }
 impl SimError {
@@ -318,9 +337,9 @@ impl PySimulator {
         self.reset();
 
         let ast = parse_ast(src)
-            .map_err(LoadError::from_lc3_err)?;
+            .map_err(|e| LoadError::from_lc3_err(e, src))?;
         let obj = assemble_debug(ast, src)
-            .map_err(LoadError::from_lc3_err)?;
+            .map_err(|e| LoadError::from_lc3_err(e, src))?;
         
         self.sim.load_obj_file(&obj);
         self.obj.replace(obj);
