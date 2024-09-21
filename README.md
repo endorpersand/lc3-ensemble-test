@@ -1,12 +1,12 @@
-# lc3-ensemble Python Backend
+# lc3-ensemble Python Backend & Autograder
 
 ## Development Setup
 
 1. Create a Python virtual environment with `python -m venv .env`
-2. Activate the environment by running the activate script
+2. Activate the environment by running the activate script:
     - Windows: `.env\Scripts\activate`
     - Other: `source .env/bin/activate`
-3. Install maturin through pip
+3. Install maturin (`pip install maturin`)
 4. Run `maturin develop`
 5. Import the `ensemble_test.core` or `ensemble_test.autograder` modules while inside the virtual environment
 
@@ -15,7 +15,7 @@
 If installing directly from this repository,
 
 - `pip install .`: Install the barebones autograder
-- `pip install .[std]` (bash) or `pip install -e '.[std]'` (zsh): Install the autograder and additional packages to help create autograders for CS 2110.
+- `pip install ".[std]"`: Install the autograder and additional packages to help create autograders for CS 2110.
 
 ## Running
 
@@ -41,6 +41,12 @@ pytest --html=report.html --self-contained-html
 
 ```zsh
 pytest --json-report
+```
+
+#### Display as JUnitXML
+
+```zsh
+pytest --junitxml=report.xml
 ```
 
 ### Without standard dependencies
