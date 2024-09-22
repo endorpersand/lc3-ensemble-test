@@ -4,6 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "lc3-ensemble-test"
+description = "Python backend and autograder library for LC-3 assembly"
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Rust",
