@@ -4,6 +4,7 @@ Test case utility.
 from collections.abc import Iterable
 import dataclasses
 import itertools
+import os
 from pathlib import Path
 import traceback
 from typing import List, Literal, NamedTuple, Optional, Union
@@ -420,17 +421,21 @@ class LC3UnitTestCase(unittest.TestCase):
         fp : str
             the file path to load from
         """
-        # pytest by default resolves relative paths from the directory of execution
-        # however, we should use the directory of test so we don't crash by being in a different directory
-        
-        # file path of test
-        testFp = Path(traceback.extract_stack()[-2].filename)
-        # directory of test
-        testDir = testFp.parent
-        # resource as resolved from the test directory
-        resourceFp = testDir / fp
+        # set the resolve directory for file paths to the given environment variable (if present)
+        # or to the directory where the test is located
+        rootTestDir = os.environ.get("TEST_ROOT_DIR")
+        if rootTestDir:
+            rootTestDir = Path(rootTestDir)
+        else:
+            # pytest by default resolves relative paths from the directory of execution
+            # however, we should use the directory of test so we don't crash by being in a different directory
+            
+            # file path of test
+            testFp = Path(traceback.extract_stack()[-2].filename)
+            # directory of test
+            rootTestDir = testFp.parent
 
-        self.source_code = resourceFp
+        self.source_code = rootTestDir / fp
         self._load_from_src()
     
     def loadCode(self, src: str):
