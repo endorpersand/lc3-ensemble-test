@@ -179,7 +179,7 @@ def _get_loc_name(loc: MemLocation) -> str:
 
 def parameterized_name(testcase_fn, param_num, param):
     from parameterized import parameterized
-    return "{}_{}".format(
+    return "{}[{}]".format(
         testcase_fn.__name__,
         parameterized.to_safe_name("_".join(str(x) for x in param.args)),
     )
@@ -187,6 +187,16 @@ def parameterized_doc(testcase_fn, param_num, param):
     return testcase_fn.__doc__ and testcase_fn.__doc__.format(*param.args)
 
 class LC3UnitTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # HACK: 
+        # parameterized removes the __wrapped__ parameter to stop pytest from doing something(?)
+        # however, it actually inhibits pytest from printing its error text properly
+        # this loop reinstalls the parameter in all parameterized tests
+        for f in cls.__dict__.values():
+            if hasattr(f, "place_as"):
+                f.__wrapped__ = f.place_as
+
     def setUp(self):
         self.sim = core.Simulator()
         # State of all 8 registers before execution.
