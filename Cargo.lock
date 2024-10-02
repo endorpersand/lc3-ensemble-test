@@ -43,7 +43,7 @@ checksum = "22ec99545bb0ed0ea7bb9b8e1e9122ea386ff8a48c0922e43f36d45ab09e0e80"
 
 [[package]]
 name = "ensemble-test"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "lc3-ensemble",
  "pyo3",
@@ -87,9 +87,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lc3-ensemble"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420917b1bfb79b8d496fd918809ca9b013579dbb2452ed7f5df2261eab94a4e4"
+checksum = "362fe39829664f222201ae61b43a5dffd9cf7eb44b9e3b122ad175402d1b1095"
 dependencies = [
  "crossbeam-channel",
  "logos",
