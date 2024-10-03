@@ -13,7 +13,7 @@ pip install lc3-ensemble-test
 To install additional packages to help create autograders for GT CS 2110,
 
 ```zsh
-pip install lc3-ensemble-test[std]
+pip install "lc3-ensemble-test[std]"
 ```
 
 ## Running
@@ -35,12 +35,6 @@ pytest --html=report.html --self-contained-html
 ```
 
 *The `conftest.py` provided in `examples/` will automatically open the generated page in a web browser.*
-
-#### Display as JSON
-
-```zsh
-pytest --json-report
-```
 
 #### Display as JUnitXML
 
