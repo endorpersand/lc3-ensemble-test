@@ -828,7 +828,7 @@ class LC3UnitTestCase(unittest.TestCase):
             if ch == 0: break
 
             if not (0 <= ch <= 127):
-                fail_str = bytes(actual[:i + 1]).decode("ascii", errors="replace") + "..."
+                fail_str = bytes(min(max(0, c), 255) for c in actual[:i + 1]).decode("ascii", errors="replace") + "..."
                 fail_array = f"[{', '.join(str(c) for c in actual[:i + 1])}, ...]"
                 self.fail(f"Found invalid ASCII byte in string starting at mem[{loc_name}]: {fail_str} {fail_array}")
 
