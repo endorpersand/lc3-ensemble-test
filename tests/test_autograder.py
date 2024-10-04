@@ -123,7 +123,7 @@ class TestLC3Sample(LC3UnitTestCase):
                 .fill x48
                 .fill x45
                 .fill xF0
-                .fill x9F
+                .fill x9FFF
                 .fill x98
                 .fill x94
                 .fill 0

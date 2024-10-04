@@ -66,6 +66,12 @@ def _format_call(label: str, args: list[int] | None):
     args_str = ", ".join(str(a) for a in args) if args is not None else "..."
     return f"{label}({args_str})"
 
+def _format_maybe_string(s: list[int]) -> str:
+    """
+    Formats a contiguous array that may not have printable ASCII characters.
+    """
+    return bytes(min(max(0, c), 255) for c in s).decode("ascii", errors="replace")
+
 @dataclasses.dataclass
 class CallNode:
     frame_no: int
@@ -828,7 +834,7 @@ class LC3UnitTestCase(unittest.TestCase):
             if ch == 0: break
 
             if not (0 <= ch <= 127):
-                fail_str = bytes(min(max(0, c), 255) for c in actual[:i + 1]).decode("ascii", errors="replace") + "..."
+                fail_str = _format_maybe_string(actual[:i + 1])
                 fail_array = f"[{', '.join(str(c) for c in actual[:i + 1])}, ...]"
                 self.fail(f"Found invalid ASCII byte in string starting at mem[{loc_name}]: {fail_str} {fail_array}")
 
@@ -842,7 +848,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 #    AssertionError: String starting at mem[LABEL] longer than expected
                 #    expected: GOOD     [71, 79, 79, 68, 0]
                 #    actual:   GOODB... [71, 79, 79, 68, 66, ...]
-                actual_str = bytes(actual).decode("ascii")
+                actual_str = _format_maybe_string(actual)
                 actual_arr = f"[{', '.join(str(c) for c in actual)}, ...]"
                 self.fail(
                     _simple_assert_msg(f"String starting at mem[{loc_name}] longer than expected", 
@@ -858,11 +864,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 #    expected: GOODBYE!!! [71, 79, 79, 68, 66, 89, 69, 33, 33, 33, 0]
                 #    actual:   GOODBYE.   [71, 79, 79, 68, 66, 89, 69, 46, 0]
                 null_term = actual.index(0)
-                actual_str = (
-                    bytes(actual[:null_term])
-                        .decode("ascii")
-                        .ljust(len(expected_str))
-                )
+                actual_str = _format_maybe_string(actual[:null_term]).ljust(len(expected_str))
                 actual_arr = actual[:null_term + 1]
                 self.fail(
                     _simple_assert_msg(f"String starting at mem[{loc_name}] shorter than expected",
@@ -876,7 +878,7 @@ class LC3UnitTestCase(unittest.TestCase):
             #    AssertionError: 63 != 46 : String starting at mem[LABEL] did not match expected
             #    expected: GOODBYE? [71, 79, 79, 68, 66, 89, 69, 63, 0]
             #    actual:   GOODBYE. [71, 79, 79, 68, 66, 89, 69, 46, 0]
-            actual_str = bytes(actual[:-1]).decode("ascii")
+            actual_str = _format_maybe_string(actual[:-1])
             self.assertEqual(e, a,
                 _simple_assert_msg(f"String starting at mem[{loc_name}] did not match expected", 
                     f"{expected_str} {expected}", 
