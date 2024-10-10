@@ -14,6 +14,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+authors = [
+    { name = "Henry Bui" }
+]
 
 [project.optional-dependencies]
 # Standard setup for CS2110 autograders
@@ -23,6 +26,8 @@ std = [
     "pytest-html==4.1.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/endorpersand/lc3-ensemble-test"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

@@ -7,7 +7,7 @@ This document intends to give a brief summary of all of the available methods pr
 If you want to see some examples of the autograder in action, see:
 
 - [`examples/0-template`](../../examples/0-template): Autograder templates
-- [`examples/](../../examples/): Autograder examples
+- [`examples/`](../../examples/): Autograder examples
 
 If you want a full description of the methods, these are provided in the docs of each function.
 
