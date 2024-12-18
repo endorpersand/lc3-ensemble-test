@@ -345,6 +345,97 @@ class TestLC3Sample(LC3UnitTestCase):
         self.assertReturnValue(15)
         self.assertSubroutineCalled("SUMTORIAL")
 
+    def test_assert_program_subroutine_utils(self):
+        self.loadFile("asm/sumtorial-lc3cc.asm")
+        
+        self.defineSubroutine("SUMTORIAL", ["n"])
+
+        for N in range(15):
+            self.sim.pc = 0x3000
+            self.writeMemValue("N", N)
+            self.runCode()
+            self.assertHalted()
+            self.assertReg(6, 0xD000)
+            self.assertReg(0, N * (N + 1) // 2)
+
+            self.assertSubroutineCalled("SUMTORIAL", [N])
+
+    def test_assert_sr_in_order(self):
+        code = f"""
+            .orig x3000
+            LD R6, SP
+            JSR FOO
+            ADD R6, R6, #1
+            HALT
+            SP .fill x6666
+
+            {_subroutine("FOO", '''
+                ;; call BAR(0)
+                AND R0, R0, #0
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR BAR
+                ADD R6, R6, #2
+            ''')}
+            {_subroutine("BAR", '''
+                ;; call BAZ(1)
+                AND R0, R0, #0
+                ADD R0, R0, #1
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR BAZ
+                ADD R6, R6, #2
+            ''')}
+            {_subroutine("BAZ", '''
+                ;; call QUX(2)
+                AND R0, R0, #0
+                ADD R0, R0, #2
+                ADD R6, R6, #-1
+                STR R0, R6, #0
+                JSR QUX
+                ADD R6, R6, #2
+            ''')}
+            {_subroutine("QUX", '''
+                AND R0, R0, #0
+                ADD R0, R0, #3
+            ''')}
+
+            .end
+        """
+        self.loadCode(code)
+        self.defineSubroutine("FOO", [])
+        self.defineSubroutine("BAR", ["arg"])
+        self.defineSubroutine("BAZ", ["arg"])
+        self.defineSubroutine("QUX", ["arg"])
+
+        # program execution
+        self.runCode()
+        self.assertHalted()
+        self.assertStackCorrect(0x6666)
+        self.assertSubroutinesCalledInOrder([
+            "FOO", "BAR", "BAZ", "QUX"
+        ])
+        self.assertSubroutinesCalledInOrder([
+            ("FOO", []),
+            ("BAR", [0]),
+            ("BAZ", [1]),
+            ("QUX", [2]),
+        ])
+
+        # with subroutines
+        self.callSubroutine("FOO", [])
+        self.assertReturned()
+        self.assertStackCorrect()
+        self.assertSubroutinesCalledInOrder([
+            "FOO", "BAR", "BAZ", "QUX"
+        ])
+        self.assertSubroutinesCalledInOrder([
+            ("FOO", []),
+            ("BAR", [0]),
+            ("BAZ", [1]),
+            ("QUX", [2]),
+        ])
+
     def test_halt(self):
         # halting program
         self.loadCode("""

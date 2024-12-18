@@ -113,13 +113,7 @@ def test_foo(self, param1, param2):
     # etc.
 ```
 
-Note that there are many assertion methods unique to subroutines:
-
-- `autograder.LC3UnitTestCase.assertStackCorrect()`
-- `autograder.LC3UnitTestCase.assertReturned()`
-- `autograder.LC3UnitTestCase.assertReturnValue(int)`
-- `autograder.LC3UnitTestCase.assertSubroutineCalled(str, list | None, *, directly_called: bool)`
-- `autograder.LC3UnitTestCase.assertSubroutinesCalledInOrder(calls: list)`
+One can also check the value returned by a subroutine with `autograder.LC3UnitTestCase.assertReturnValue`.
 
 ## Initialization
 
@@ -258,7 +252,7 @@ Asserts the current condition code matches an expected condition code.
 
 Asserts the values of the registers are unchanged after an execution.
 
-This method can only be called after an execution call.
+This method can only be called after an execution.
 
 ### autograder.LC3UnitTestCase.assertStackCorrect()
 
@@ -288,7 +282,7 @@ This method can only be called after `self.callSubroutine`.
 
 ### autograder.LC3UnitTestCase.assertSubroutineCalled(label: str, args: list[int] | None = ..., *, directly_called: bool = ...)
 
-Asserts that a subroutine was correctly called after `self.callSubroutine`.
+Asserts that a subroutine was correctly called during an execution.
 
 For example, if a helper subroutine `"BAR"` is expected to be used in subroutine `"FOO"`,
 this could be done by producing:
@@ -306,8 +300,8 @@ If we want to assert a specific argument was called, we can do that as well:
     self.assertSubroutineCalled("BAR", [ N ])
 ```
 
-Note that by default, `assertSubroutineCalled` requires that the top-level of the original subroutine call calls the expected callee.
-If you wish to require that a given subroutine is called *at all* during a subroutine's execution, set the argument `directly_called` to `False`.
+Note that by default, `assertSubroutineCalled` requires that the execution calls the expected callee at the top-level.
+If you wish to require that a given subroutine is called *at all* during an execution, set the argument `directly_called` to `False`.
 
 ```text
 FOO:
@@ -324,11 +318,11 @@ BAZ:
     RET
 ```
 
-This method can only be called after `self.callSubroutine`.
+This method can only be called after an execution. Additionally, the `label` argument must point to a subroutine defined using `self.defineSubroutine`.
 
 ### autograder.LC3UnitTestCase.assertSubroutinesCalledInOrder(calls: list[str | tuple[str, list[int] | None]])
 
-Asserts that a subroutine call correctly calls a given list of subroutines in order.
+Asserts that a given list of subroutines were called in order during execution.
 
 For example, given the pseudocode:
 
@@ -352,7 +346,7 @@ This call order can be asserted with:
 
 ```py
 self.callSubroutine("FOO", [ ... ])
-self.assertSubroutinesCalledInOrder(
+self.assertSubroutinesCalledInOrder([
     "FOO", 
     ("PRINT", [0]),
     "BAR",
@@ -361,23 +355,23 @@ self.assertSubroutinesCalledInOrder(
     ("PRINT", [2]),
     ("PRINT", [3]),
     ("PRINT", [4]),
-)
+])
 ```
 
 Or if we only want to assert the `PRINT` calls:
 
 ```py
 self.callSubroutine("FOO", [ ... ])
-self.assertSubroutinesCalledInOrder(
+self.assertSubroutinesCalledInOrder([
     ("PRINT", [0]),
     ("PRINT", [1]),
     ("PRINT", [2]),
     ("PRINT", [3]),
     ("PRINT", [4]),
-)
+])
 ```
 
-This method can only be called after `self.callSubroutine`.
+This method can only be called after an execution. Additionally, the subroutine arguments must point to a subroutine defined using `self.defineSubroutine`.
 
 ## Internal
 
