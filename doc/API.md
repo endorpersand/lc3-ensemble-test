@@ -198,6 +198,10 @@ Writes a value to a register.
 
 Sets the keyboard input (i.e., what was typed into the simulator) to a given string.
 
+### autograder.LC3UnitTestCase.setPC(pc: str)
+
+Sets the program counter to the given address.
+
 ## Executions
 
 These are methods which actually execute code. The state of the simulator after an execution can be checked with assertions.
@@ -423,11 +427,11 @@ On next execution, if the simulator passes this location, execution pauses.
 
 Removes the breakpoint at a given location (label or address).
 
-### core.Simulator.breakpoints (property)
+### core.Simulator.breakpoints (readonly property)
 
 Readonly property which provides the current list of addresses that have a breakpoint bound to them.
 
-### core.Simulator.{n, z, p} (properties)
+### core.Simulator.{n, z, p} (readonly properties)
 
 Readonly properties holding whether each condition code is true or not.
 
@@ -451,15 +455,15 @@ A configuration setting determining whether there should be runtime checks for i
 
 Properties holding the console input and output. These can be read and written to.
 
-### core.Simulator.frame_number (property)
+### core.Simulator.frame_number (readonly property)
 
 Readonly property holding the current frame number (number of calls deep) the simulator currently is.
 
-### core.Simulator.frames (property)
+### core.Simulator.frames (readonly property)
 
 Readonly property holding the current frame stack (or `None` if `debug_frames` is disabled)
 
-### core.Simulator.last_frame (property)
+### core.Simulator.last_frame (readonly property)
 
 Readonly property holding the last frame in the frame stack (or None if `debug_frames` is disabled)
 

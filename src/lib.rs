@@ -575,6 +575,7 @@ impl PySimulator {
     }
     
     /// Gets a list of currently defined breakpoints.
+    #[getter]
     fn breakpoints(&self) -> Vec<u16> {
         self.sim.breakpoints.iter()
             .filter_map(|bpt| match *bpt {

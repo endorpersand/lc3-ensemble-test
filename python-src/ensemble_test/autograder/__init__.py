@@ -573,6 +573,16 @@ class LC3UnitTestCase(unittest.TestCase):
         _verify_ascii_string(inp, arg_desc=f"input parameter ({inp=!r})")
         self.sim.input = inp
 
+    def setPC(self, pc: int):
+        """
+        Sets the program counter to the given address.
+
+        Parameters
+        ----------
+        pc : int
+            Address to set the PC to.
+        """
+        self.sim.pc = _to_u16(pc)
 
     def defineSubroutine(self, loc: MemLocation, params: Union["list[str]", "dict[int, str]"], ret: Optional[int] = None):
         """

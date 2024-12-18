@@ -258,7 +258,7 @@ class TestLC3Sample(LC3UnitTestCase):
         # ---------------------------------------------
         # suppose we ran it normally:
         for N in range(15):
-            self.sim.pc = 0x3000
+            self.setPC(0x3000)
             self.writeMemValue("N", N)
             self.runCode()
             self.assertHalted()
@@ -297,7 +297,7 @@ class TestLC3Sample(LC3UnitTestCase):
         # ---------------------------------------------
         # suppose we ran it normally:
         for N in range(15):
-            self.sim.pc = 0x3000
+            self.setPC(0x3000)
             self.writeMemValue("N", N)
             self.runCode()
             self.assertHalted()
@@ -328,7 +328,7 @@ class TestLC3Sample(LC3UnitTestCase):
         # ---------------------------------------------
         # suppose we ran it normally:
         for N in range(15):
-            self.sim.pc = 0x3000
+            self.setPC(0x3000)
             self.writeMemValue("N", N)
             self.runCode()
             self.assertHalted()
@@ -351,7 +351,7 @@ class TestLC3Sample(LC3UnitTestCase):
         self.defineSubroutine("SUMTORIAL", ["n"])
 
         for N in range(15):
-            self.sim.pc = 0x3000
+            self.setPC(0x3000)
             self.writeMemValue("N", N)
             self.runCode()
             self.assertHalted()
