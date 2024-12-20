@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "lc3-ensemble-test"
-version = "0.1.6"
+version = "0.1.7"
 description = "Python backend and autograder library for LC-3 assembly"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
@@ -14,6 +14,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+authors = [
+    { name = "Henry Bui" }
+]
 
 [project.optional-dependencies]
 # Standard setup for CS2110 autograders
@@ -23,6 +26,8 @@ std = [
     "pytest-html==4.1.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/endorpersand/lc3-ensemble-test"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

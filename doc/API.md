@@ -7,7 +7,7 @@ This document intends to give a brief summary of all of the available methods pr
 If you want to see some examples of the autograder in action, see:
 
 - [`examples/0-template`](../../examples/0-template): Autograder templates
-- [`examples/](../../examples/): Autograder examples
+- [`examples/`](../../examples/): Autograder examples
 
 If you want a full description of the methods, these are provided in the docs of each function.
 
@@ -113,13 +113,7 @@ def test_foo(self, param1, param2):
     # etc.
 ```
 
-Note that there are many assertion methods unique to subroutines:
-
-- `autograder.LC3UnitTestCase.assertStackCorrect()`
-- `autograder.LC3UnitTestCase.assertReturned()`
-- `autograder.LC3UnitTestCase.assertReturnValue(int)`
-- `autograder.LC3UnitTestCase.assertSubroutineCalled(str, list | None, *, directly_called: bool)`
-- `autograder.LC3UnitTestCase.assertSubroutinesCalledInOrder(calls: list)`
+One can also check the value returned by a subroutine with `autograder.LC3UnitTestCase.assertReturnValue`.
 
 ## Initialization
 
@@ -204,6 +198,10 @@ Writes a value to a register.
 
 Sets the keyboard input (i.e., what was typed into the simulator) to a given string.
 
+### autograder.LC3UnitTestCase.setPC(pc: str)
+
+Sets the program counter to the given address.
+
 ## Executions
 
 These are methods which actually execute code. The state of the simulator after an execution can be checked with assertions.
@@ -258,7 +256,7 @@ Asserts the current condition code matches an expected condition code.
 
 Asserts the values of the registers are unchanged after an execution.
 
-This method can only be called after an execution call.
+This method can only be called after an execution.
 
 ### autograder.LC3UnitTestCase.assertStackCorrect()
 
@@ -288,7 +286,7 @@ This method can only be called after `self.callSubroutine`.
 
 ### autograder.LC3UnitTestCase.assertSubroutineCalled(label: str, args: list[int] | None = ..., *, directly_called: bool = ...)
 
-Asserts that a subroutine was correctly called after `self.callSubroutine`.
+Asserts that a subroutine was correctly called during an execution.
 
 For example, if a helper subroutine `"BAR"` is expected to be used in subroutine `"FOO"`,
 this could be done by producing:
@@ -306,8 +304,8 @@ If we want to assert a specific argument was called, we can do that as well:
     self.assertSubroutineCalled("BAR", [ N ])
 ```
 
-Note that by default, `assertSubroutineCalled` requires that the top-level of the original subroutine call calls the expected callee.
-If you wish to require that a given subroutine is called *at all* during a subroutine's execution, set the argument `directly_called` to `False`.
+Note that by default, `assertSubroutineCalled` requires that the execution calls the expected callee at the top-level.
+If you wish to require that a given subroutine is called *at all* during an execution, set the argument `directly_called` to `False`.
 
 ```text
 FOO:
@@ -324,11 +322,11 @@ BAZ:
     RET
 ```
 
-This method can only be called after `self.callSubroutine`.
+This method can only be called after an execution. Additionally, the `label` argument must point to a subroutine defined using `self.defineSubroutine`.
 
 ### autograder.LC3UnitTestCase.assertSubroutinesCalledInOrder(calls: list[str | tuple[str, list[int] | None]])
 
-Asserts that a subroutine call correctly calls a given list of subroutines in order.
+Asserts that a given list of subroutines were called in order during execution.
 
 For example, given the pseudocode:
 
@@ -352,7 +350,7 @@ This call order can be asserted with:
 
 ```py
 self.callSubroutine("FOO", [ ... ])
-self.assertSubroutinesCalledInOrder(
+self.assertSubroutinesCalledInOrder([
     "FOO", 
     ("PRINT", [0]),
     "BAR",
@@ -361,23 +359,23 @@ self.assertSubroutinesCalledInOrder(
     ("PRINT", [2]),
     ("PRINT", [3]),
     ("PRINT", [4]),
-)
+])
 ```
 
 Or if we only want to assert the `PRINT` calls:
 
 ```py
 self.callSubroutine("FOO", [ ... ])
-self.assertSubroutinesCalledInOrder(
+self.assertSubroutinesCalledInOrder([
     ("PRINT", [0]),
     ("PRINT", [1]),
     ("PRINT", [2]),
     ("PRINT", [3]),
     ("PRINT", [4]),
-)
+])
 ```
 
-This method can only be called after `self.callSubroutine`.
+This method can only be called after an execution. Additionally, the subroutine arguments must point to a subroutine defined using `self.defineSubroutine`.
 
 ## Internal
 
@@ -429,11 +427,11 @@ On next execution, if the simulator passes this location, execution pauses.
 
 Removes the breakpoint at a given location (label or address).
 
-### core.Simulator.breakpoints (property)
+### core.Simulator.breakpoints (readonly property)
 
 Readonly property which provides the current list of addresses that have a breakpoint bound to them.
 
-### core.Simulator.{n, z, p} (properties)
+### core.Simulator.{n, z, p} (readonly properties)
 
 Readonly properties holding whether each condition code is true or not.
 
@@ -457,15 +455,15 @@ A configuration setting determining whether there should be runtime checks for i
 
 Properties holding the console input and output. These can be read and written to.
 
-### core.Simulator.frame_number (property)
+### core.Simulator.frame_number (readonly property)
 
 Readonly property holding the current frame number (number of calls deep) the simulator currently is.
 
-### core.Simulator.frames (property)
+### core.Simulator.frames (readonly property)
 
 Readonly property holding the current frame stack (or `None` if `debug_frames` is disabled)
 
-### core.Simulator.last_frame (property)
+### core.Simulator.last_frame (readonly property)
 
 Readonly property holding the last frame in the frame stack (or None if `debug_frames` is disabled)
 

@@ -328,6 +328,7 @@ class LC3UnitTestCase(unittest.TestCase):
         # Reset these if successfully replaced the simulator's state
         self.saved_registers = None
         self.exec_props = None
+        self.call_trace_list = None
 
     def _saveRegisters(self):
         self.saved_registers = [self.sim.get_reg(i) for i in range(8)]
@@ -572,6 +573,16 @@ class LC3UnitTestCase(unittest.TestCase):
         _verify_ascii_string(inp, arg_desc=f"input parameter ({inp=!r})")
         self.sim.input = inp
 
+    def setPC(self, pc: int):
+        """
+        Sets the program counter to the given address.
+
+        Parameters
+        ----------
+        pc : int
+            Address to set the PC to.
+        """
+        self.sim.pc = _to_u16(pc)
 
     def defineSubroutine(self, loc: MemLocation, params: Union["list[str]", "dict[int, str]"], ret: Optional[int] = None):
         """
@@ -614,7 +625,68 @@ class LC3UnitTestCase(unittest.TestCase):
 
     ##### EXECUTION #####
 
-    def runCode(self, max_instrs_run=INSTRUCTION_RUN_LIMIT):
+    def _run_trace(self, max_instrs_run=INSTRUCTION_RUN_LIMIT, path: "CallTraceList | None" = None) -> CallTraceList:
+        """
+        Runs the program with the current state until completion while tracing all subroutine calls.
+        Completion here is defined as either halting or exiting the frame (if in a subroutine).
+
+        Parameters
+        ----------
+        max_instrs_run : int, optional
+            The maximum number of instructions to run before forcibly stopping, 
+            by default `INSTRUCTION_RUN_LIMIT`
+        path : list[CallNode], optional
+            The start of the path that is returned,
+            by default `[]`
+
+        Returns
+        -------
+        list[CallNode]
+            A (recursive) list of every subroutine and trap called in the order they were called.
+
+        Raises
+        ------
+        InternalArgError
+            If the simulator does not have the debug_frames flag enabled
+        """
+
+        if path is None: path = []
+        curr_path = list(path)
+
+        start_ir = self.sim.instructions_run
+        start_frame_no = self.sim.frame_number
+        while self.sim.frame_number >= start_frame_no and self.sim.instructions_run - start_ir < max_instrs_run:
+            last_frame_no = self.sim.frame_number
+            self.sim._run_until_frame_change(start_ir + max_instrs_run)
+
+            # After running at least once, check for HALT.
+            # It's important to run at least once so that the `pause_condition` 
+            # that keeps track of `hit_halt` state is cleared before running again.
+            if self.sim.hit_halt():
+                break
+
+            # we stepped into a subroutine
+            if self.sim.frame_number > last_frame_no:
+                last_frame = self.sim.last_frame
+                if last_frame is None:
+                    raise InternalArgError("cannot compute CallNode without debug_frames")
+                
+                node = CallNode(
+                    frame_no=self.sim.frame_number, 
+                    callee=last_frame.callee_addr, 
+                    args=[d for d, _ in last_frame.arguments]
+                )
+                path.append(node)
+                curr_path.append(node)
+            
+            # we stepped out of a subroutine
+            if self.sim.frame_number < last_frame_no:
+                node = curr_path.pop()
+                node.ret = self._getReturnValue(node.callee)
+        
+        return path
+
+    def runCode(self, max_instrs_run=INSTRUCTION_RUN_LIMIT, trace_calls = True):
         """
         Runs the code.
 
@@ -623,14 +695,30 @@ class LC3UnitTestCase(unittest.TestCase):
         max_instrs_run : int, optional
             The maximum number of instructions to run before forcibly stopping, 
             by default `INSTRUCTION_RUN_LIMIT`
+        trace_calls : bool, optional
+            Whether the subroutines and traps called during the program's execution
+            should be tracked and stored in `self.call_trace_list`,
+            by default `True`
         """
         self._verify_ready_to_exec()
         self._saveRegisters()
         self.exec_props = _ExecRunCode(max_instrs_run)
-        self.sim.run(max_instrs_run)
+        self.call_trace_list = None
+
+        if trace_calls:
+            self.call_trace_list = self._run_trace(max_instrs_run)
+        else:
+            self.sim.run(max_instrs_run)
 
 
-    def callSubroutine(self, label: str, args: "list[int]", R6 = 0x6666, PC = 0x7777, max_instrs_run=INSTRUCTION_RUN_LIMIT) -> CallTraceList:
+    def callSubroutine(
+            self, 
+            label: str, 
+            args: "list[int]", 
+            R6 = 0x6666, 
+            PC = 0x7777, 
+            max_instrs_run=INSTRUCTION_RUN_LIMIT
+    ) -> CallTraceList:
         """
         Calls a subroutine with the provided arguments.
 
@@ -655,7 +743,8 @@ class LC3UnitTestCase(unittest.TestCase):
         Returns
         -------
         list[CallNode]
-            The list of calls performed as a result of this subroutine call.
+            A (recursive) list of every subroutine and trap called in the order they were called.
+            This includes the outer subroutine call initiated by this function.
 
         Raises
         ------
@@ -703,38 +792,14 @@ class LC3UnitTestCase(unittest.TestCase):
         self.sim.write_mem(PC, self.sim.read_mem(PC)) # initialize this location so that it doesn't crash when calling in strict mode
 
         self.exec_props = _ExecCallSubroutine(label, args, R6, PC, max_instrs_run)
+        self.call_trace_list = None
         self.sim.call_subroutine(addr)
         
-        path: "list[CallNode]" = [CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))]
-        curr_path: "list[CallNode]" = [*path]
-
-        start = self.sim.instructions_run
-        while self.sim.frame_number >= path[0].frame_no and not self.sim.hit_halt() and self.sim.instructions_run - start < max_instrs_run:
-            last_frame_no = self.sim.frame_number
-            self.sim._run_until_frame_change(start + max_instrs_run)
-
-            # we stepped into a subroutine
-            if self.sim.frame_number > last_frame_no:
-                last_frame = self.sim.last_frame
-                if last_frame is None:
-                    raise InternalArgError("cannot compute CallNode without debug_frames")
-                
-                node = CallNode(
-                    frame_no=self.sim.frame_number, 
-                    callee=last_frame.callee_addr, 
-                    args=[d for d, _ in last_frame.arguments]
-                )
-                path.append(node)
-                curr_path.append(node)
-            
-            # we stepped out of a subroutine
-            if self.sim.frame_number < last_frame_no:
-                node = curr_path.pop()
-                node.ret = self._getReturnValue(node.callee)
+        trace = self._run_trace(max_instrs_run, path=[CallNode(frame_no=self.sim.frame_number, callee=addr, args=list(args))])
         
-        # if subroutine successfully returned, compute return value
-        if self.sim.frame_number < path[0].frame_no:
-            path[0].ret = self._getReturnValue(path[0].callee)
+        # If subroutine successfully returned, compute return value
+        if self.sim.frame_number < trace[0].frame_no:
+            trace[0].ret = self._getReturnValue(trace[0].callee)
 
         if self.sim.hit_halt():
             self.fail(f"Program halted before completing execution of subroutine {label!r}")
@@ -744,8 +809,7 @@ class LC3UnitTestCase(unittest.TestCase):
             # Offset is used for self.assertStackCorrect
             self.sim.r6 += len(args) + 1
 
-        # TODO: better interface than list[CallNode]
-        self.call_trace_list = list(path)
+        self.call_trace_list = trace
         return self.call_trace_list
     
     ##### ASSERTIONS #####
@@ -1023,27 +1087,50 @@ class LC3UnitTestCase(unittest.TestCase):
             msg =  _nonnull_or_default(msg_fmt, "Registers changed after execution: incorrect value for register {}").format(r)
             self._assertShortEqual(self.saved_registers[r], self.sim.get_reg(r), msg)
     
-    def assertStackCorrect(self):
+    def assertStackCorrect(self, init_sp: int | None = None):
         """
-        Asserts the stack is managed correctly after a subroutine call.
+        Asserts the stack is managed correctly.
 
+        This simply checks that R6 before and after execution is preserved.
+        Thus, the execution this is called on should have 
+        some sort of established calling convention on the stack.
+
+        Parameters
+        ----------
+        init_sp : int, optional
+            The initial value of the stack pointer to check against.
+            This must be provided if this is a self.runCode execution,
+            and can be optionally provided if this is a self.callSubroutine execution.
+        
         Raises
         ------
         InternalArgError
-            If a call to this function wasn't preceded by a self.callSubroutine execution.
+            If `init_sp` is not provided on a self.runCode execution
         """
-        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.saved_registers is None:
-            raise InternalArgError("self.assertStackCorrect can only be called after self.callSubroutine")
-        
-        # This should check for overflow, 
-        # but that is such a degenerate case that it's probably fine to ignore.
-        orig_sp  = _to_u16(self.saved_registers[6])
+        if self.saved_registers is None:
+            raise InternalArgError("no execution to assert stack management on")
+
+        if isinstance(self.exec_props, _ExecRunCode):
+            caller_name = "program"
+            if init_sp is None:
+                raise InternalArgError("assertStackCorrect was called on a self.runCode subroutine without a init_sp parameter")
+        elif isinstance(self.exec_props, _ExecCallSubroutine):
+            caller_name = f"subroutine {self.exec_props.label!r}"
+        else:
+            raise InternalArgError(f"Unknown execution type {type(self.exec_props).__name__!r}")
+
+        orig_sp  = _to_u16(init_sp or self.saved_registers[6])
         final_sp = _to_u16(self.sim.r6)
 
-        if final_sp < orig_sp:
-            self.fail(f"Stack was not managed properly for subroutine {self.exec_props.label!r}: there were more items remaining in the stack than expected")
-        if final_sp > orig_sp:
-            self.fail(f"Stack was not managed properly for subroutine {self.exec_props.label!r}: there were fewer items remaining in the stack than expected")
+        # This should check for overflow, 
+        # but that is such a degenerate case that it's probably fine to ignore.
+        diff = orig_sp - final_sp
+        if diff > 0:
+            items = "was 1 item" if diff == 1 else f"were {diff} items"
+            self.fail(f"Stack was not managed properly for {caller_name}: there {items} more than expected left on the stack")
+        if diff < 0:
+            items = "was 1 item" if diff == -1 else f"were {-diff} items"
+            self.fail(f"Stack was not managed properly for {caller_name}: there {items} fewer than expected left on the stack")
         
     def assertHalted(self, msg: Optional[str] = None):
         """
@@ -1064,7 +1151,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 "self.assertHalted can only be called after self.runCode.\n"
                 "If you meant to check if the subroutine returned, use self.assertReturned."
             )
-        
+
         if not self.sim.hit_halt():
             msg = _nonnull_or_default(msg, "Program did not halt correctly") + self._formatFrameStack()
             self.fail(msg)
@@ -1119,8 +1206,6 @@ class LC3UnitTestCase(unittest.TestCase):
         actual = self.call_trace_list[0].ret
 
         if actual is None:
-            # I don't think this is reachable except by invalid arguments
-            # Subroutines without return values shouldn't call this function ever(?)
             self.fail(_nonnull_or_default(msg, f"Subroutine unexpectedly did not return a value"))
         
         self._assertShortEqual(expected, actual, _nonnull_or_default(msg, "Incorrect return value"))
@@ -1133,7 +1218,7 @@ class LC3UnitTestCase(unittest.TestCase):
             msg_fmt: Optional[str] = None
     ):
         """
-        Asserts that a subroutine call correctly called another subroutine.
+        Asserts that a subroutine was called during execution.
 
         For example, if a helper subroutine `"BAR"` is expected to be used in subroutine `"FOO"`,
         this could be done by producing:
@@ -1149,10 +1234,10 @@ class LC3UnitTestCase(unittest.TestCase):
             self.assertSubroutineCalled("BAR", [ N ])
         ```
 
-        Note that by default, `assertSubroutineCalled` requires that the top-level of 
-        the original subroutine call calls the expected callee. 
-        If you wish to require that a given subroutine is called *at all* during a
-        subroutine's execution, set the argument `directly_called` to `False`.
+        By default, `assertSubroutineCalled` requires that the top-level executor
+        calls the expected callee.
+        If you wish to require that a given subroutine is called *at all* during an
+        execution, set the argument `directly_called` to `False`.
         ```
         FOO:
             JSR BAR ;; BAR is directly called by FOO
@@ -1185,37 +1270,50 @@ class LC3UnitTestCase(unittest.TestCase):
         Raises
         ------
         InternalArgError
-            If a call to this function wasn't preceded by a self.callSubroutine execution,
+            If a call to this function was not preceded by a tracing execution,
             or if the provided label does not exist.
         """
         
-        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.call_trace_list is None:
+        if self.call_trace_list is None:
             raise InternalArgError(
-                "self.assertSubroutineCalled can only be called after self.callSubroutine."
+                "self.assertSubroutineCalled can only be called after a tracing execution\n"
+                "(e.g., \"self.runCode(..., trace_calls=True)\" or \"self.callSubroutine(...)\")"
             )
         
-        caller = self.exec_props.label
+        # Compute all properties for the differing execution types:
+        # - caller_name: The execution's label in errors
+        # - direct_call_frame: The frame number for "direct calls"
+        # - subcalls: Which calls count as subcalls of the execution
+        if isinstance(self.exec_props, _ExecRunCode):
+            caller_name = "Program"
+            direct_call_frame = self.call_trace_list[0].frame_no if len(self.call_trace_list) > 0 else -1
+            subcalls = self.call_trace_list
+        elif isinstance(self.exec_props, _ExecCallSubroutine):
+            caller_name = f"Subroutine {self.exec_props.label!r}"
+            direct_call_frame = self.call_trace_list[0].frame_no + 1
+            subcalls = self.call_trace_list[1:]
+        else:
+            raise InternalArgError(f"Unknown execution type {type(self.exec_props).__name__!r}")
         callee_addr = self._lookup(label)
 
-        msg = _nonnull_or_default(msg_fmt, "Subroutine {} did not call {}").format(repr(caller), repr(label))
+        msg = _nonnull_or_default(msg_fmt, "{} did not call {}").format(caller_name, repr(label))
 
         # Find a subroutine call which has:
-        # - the right frame number (if directly_called, then original call + 1, else any)
+        # - the right frame number (if directly_called)
         # - the right subroutine name
         # - the right arguments (if args is not None, then args, else any)
-        call_frame = self.call_trace_list[0].frame_no + 1
-        def correct_frame_no(c: CallNode): return not directly_called or c.frame_no == call_frame
+        def correct_frame_no(c: CallNode): return not directly_called or c.frame_no == direct_call_frame
         def correct_address(c: CallNode): return c.callee == callee_addr
         def correct_arguments(c: CallNode): return args is None or c.args == args
         matching_call = any(
             correct_frame_no(c) and correct_address(c) and correct_arguments(c) 
-            for c in self.call_trace_list[1:]
+            for c in subcalls
         )
         if not matching_call: self.fail(msg)
 
     def assertSubroutinesCalledInOrder(self, calls: "list[str | tuple[str, list[int] | None]]"):
         """
-        Asserts that a subroutine call correctly calls a given list of subroutines in order.
+        Asserts that a given list of subroutines were called in order during execution.
 
         For example, given the pseudocode:
         ```
@@ -1237,7 +1335,7 @@ class LC3UnitTestCase(unittest.TestCase):
         This call order can be asserted with:
         ```py
         self.callSubroutine("FOO", [ ... ])
-        self.assertSubroutinesCalledInOrder(
+        self.assertSubroutinesCalledInOrder([
             "FOO", 
             ("PRINT", [0]),
             "BAR",
@@ -1246,19 +1344,19 @@ class LC3UnitTestCase(unittest.TestCase):
             ("PRINT", [2]),
             ("PRINT", [3]),
             ("PRINT", [4]),
-        )
+        ])
         ```
 
         Or if we only want to assert the `PRINT` calls:
         ```py
         self.callSubroutine("FOO", [ ... ])
-        self.assertSubroutinesCalledInOrder(
+        self.assertSubroutinesCalledInOrder([
             ("PRINT", [0]),
             ("PRINT", [1]),
             ("PRINT", [2]),
             ("PRINT", [3]),
             ("PRINT", [4]),
-        )
+        ])
         ```
 
         Parameters
@@ -1274,13 +1372,15 @@ class LC3UnitTestCase(unittest.TestCase):
         Raises
         ------
         InternalArgError
-            If a call to this function wasn't preceded by a self.callSubroutine execution,
-            or if the provided labels (for each call) do not exist, or an invalid call type was given.
+            If a call to this function was not preceded by a tracing execution,
+            or if the provided labels (for each call) do not exist,
+            or an invalid call type was given.
         """
 
-        if not isinstance(self.exec_props, _ExecCallSubroutine) or self.call_trace_list is None:
+        if self.call_trace_list is None:
             raise InternalArgError(
-                "self.assertSubroutineCalled can only be called after self.callSubroutine."
+                "self.assertSubroutineCalled can only be called after a tracing execution\n"
+                "(e.g., \"self.runCode(..., trace_calls=True)\" or \"self.callSubroutine(...)\")"
             )
         
         # Parse calls into (callee name, callee addr, argument)
@@ -1309,7 +1409,7 @@ class LC3UnitTestCase(unittest.TestCase):
                 found_str = ", ".join(_format_call(label, args) for (label, _, args) in _calls[:i])
                 missing_str = _format_call(callee_label, args)
                 msg = (
-                    "Subroutines were not called in order. "
+                    "Subroutines were not called in order.\n"
                     f"After calls [{found_str}], "
                     f"{missing_str} should have been called."
                 )

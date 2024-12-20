@@ -17,8 +17,8 @@ use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 #[pymodule]
 fn ensemble_test(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySimulator>()?;
-    m.add("LoadError", py.get_type_bound::<LoadError>())?;
-    m.add("SimError", py.get_type_bound::<SimError>())?;
+    m.add("LoadError", py.get_type::<LoadError>())?;
+    m.add("SimError", py.get_type::<SimError>())?;
     m.add_class::<MemoryFillType>()?;
     m.add_class::<CallingConventionSRDef>()?;
     m.add_class::<PassByRegisterSRDef>()?;
@@ -98,10 +98,15 @@ enum MemoryFillType {
 }
 
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 struct RegWrapper(Reg);
-impl IntoPy<PyObject> for RegWrapper {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        self.0.reg_no().into_py(py)
+impl<'py> IntoPyObject<'py> for RegWrapper {
+    type Target = PyInt;
+    type Output = Bound<'py, Self::Target>;
+    type Error = std::convert::Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.reg_no().into_pyobject(py)
     }
 }
 impl<'py> FromPyObject<'py> for RegWrapper {
@@ -160,18 +165,27 @@ impl PassByRegisterSRDef {
     }
 }
 
+#[repr(transparent)]
 struct PyParamListWrapper(ParameterList);
-impl IntoPy<PyObject> for PyParamListWrapper {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for PyParamListWrapper {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PyErr;
+    
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         match self.0 {
-            ParameterList::CallingConvention { params } => CallingConventionSRDef { params }.into_py(py),
+            ParameterList::CallingConvention { params } => {
+                CallingConventionSRDef { params }.into_pyobject(py)
+                    .map(Bound::into_any)
+            },
             ParameterList::PassByRegister { params, ret } => {
                 let params: Vec<_> = params.into_iter()
                     .map(|(s, r)| (s, RegWrapper(r)))
                     .collect();
                 let ret = ret.map(RegWrapper);
 
-                PassByRegisterSRDef { params, ret }.into_py(py)
+                PassByRegisterSRDef { params, ret }.into_pyobject(py)
+                    .map(Bound::into_any)
             },
         }
     }
@@ -343,7 +357,8 @@ impl PySimulator {
         let obj = assemble_debug(ast, src)
             .map_err(|e| LoadError::from_lc3_err(e, src))?;
         
-        self.sim.load_obj_file(&obj);
+        self.sim.load_obj_file(&obj)
+            .map_err(|e| LoadError::new_err(format!("failed to load object file: {e}")))?;
         self.obj.replace(obj);
         Ok(())
     }
@@ -575,6 +590,7 @@ impl PySimulator {
     }
     
     /// Gets a list of currently defined breakpoints.
+    #[getter]
     fn breakpoints(&self) -> Vec<u16> {
         self.sim.breakpoints.iter()
             .filter_map(|bpt| match *bpt {
