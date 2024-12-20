@@ -343,7 +343,8 @@ impl PySimulator {
         let obj = assemble_debug(ast, src)
             .map_err(|e| LoadError::from_lc3_err(e, src))?;
         
-        self.sim.load_obj_file(&obj);
+        self.sim.load_obj_file(&obj)
+            .map_err(|e| LoadError::new_err(format!("failed to load object file: {e}")))?;
         self.obj.replace(obj);
         Ok(())
     }
