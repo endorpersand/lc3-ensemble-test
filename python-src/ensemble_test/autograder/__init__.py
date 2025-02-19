@@ -1296,8 +1296,6 @@ class LC3UnitTestCase(unittest.TestCase):
             raise InternalArgError(f"Unknown execution type {type(self.exec_props).__name__!r}")
         callee_addr = self._lookup(label)
 
-        msg = _nonnull_or_default(msg_fmt, "{} did not call {}").format(caller_name, repr(label))
-
         # Find a subroutine call which has:
         # - the right frame number (if directly_called)
         # - the right subroutine name
@@ -1305,11 +1303,25 @@ class LC3UnitTestCase(unittest.TestCase):
         def correct_frame_no(c: CallNode): return not directly_called or c.frame_no == direct_call_frame
         def correct_address(c: CallNode): return c.callee == callee_addr
         def correct_arguments(c: CallNode): return args is None or c.args == args
-        matching_call = any(
-            correct_frame_no(c) and correct_address(c) and correct_arguments(c) 
-            for c in subcalls
-        )
-        if not matching_call: self.fail(msg)
+
+        # All calls with the correct frame + subroutine addr
+        naive_matching_calls = [c for c in subcalls if correct_frame_no(c) and correct_address(c)]
+        if len(naive_matching_calls) == 0:
+            msg = _nonnull_or_default(msg_fmt, "{} should have called {}").format(caller_name, repr(label))
+            self.fail(msg)
+        
+        has_matching_call = any(correct_arguments(c) for c in naive_matching_calls)
+        if not has_matching_call:
+            msg = "\n".join([
+                _nonnull_or_default(msg_fmt, "{} called {}, but not with the expected arguments").format(caller_name, repr(label)),
+                f"expected: {_format_call(label, args)}",
+                f"all {label!r} calls:",
+                *(
+                    " " * 4 + _format_call(label, c.args) for c in naive_matching_calls
+                )
+
+            ])
+            self.fail(msg)
 
     def assertSubroutinesCalledInOrder(self, calls: "list[str | tuple[str, list[int] | None]]"):
         """
