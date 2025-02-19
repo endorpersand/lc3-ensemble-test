@@ -868,13 +868,18 @@ class LC3UnitTestCase(unittest.TestCase):
             A custom message to print if the assertion fails.
             {0} can be used in the message format to display the label of the array.
         """
+        lm = self.longMessage
+        if len(arr) > 10: self.longMessage = False
+
         addr = self._resolveAddr(loc)
         
-        expected = [_to_u16(e) for e in arr]
-        actual = list(self._readContiguous(addr, len(arr)))
+        expected = [_to_i16(e) for e in arr]
+        actual = [_to_i16(e) for e in self._readContiguous(addr, len(arr))]
 
         msg = _nonnull_or_default(msg_fmt, "Array starting at mem[{}] did not match expected").format(_get_loc_name(loc))
         self.assertEqual(expected, actual, _simple_assert_msg(msg, expected, actual))
+
+        if len(arr) > 10: self.longMessage = lm
 
     def assertString(self, loc: MemLocation, expected_str: str):
         """
