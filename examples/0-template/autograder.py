@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#! /usr/bin/env python3
 
 # Startup script for the LC3 autograder.
 # If you have Python installed, you can install all the dependencies for the autograder with:
