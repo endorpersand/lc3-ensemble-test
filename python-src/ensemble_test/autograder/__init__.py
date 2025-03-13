@@ -295,13 +295,13 @@ class LC3UnitTestCase(unittest.TestCase):
             elif isinstance(defn, core.PassByRegisterSRDef):
                 args = ', '.join(f"{p}={a}" for (p, _), (a, _) in zip(defn.params, frame.arguments))
             else:
-                raise NotImplementedError(f"_printStackFrame: unimplemented subroutine type {type(defn)}")
+                raise NotImplementedError(f"_formatFrame: unimplemented subroutine type {type(defn)}")
         else:
             args = "?"
 
         return f"{name}({args}): fp={fp_str}, r7={r7_str}"
     
-    def _formatFrameStack(self, frames: list[core.Frame] | None = None) -> str:
+    def _formatFrameStack(self, frames: list[core.Frame] | None = None, max_middle_frames = 8) -> str:
         frames = self.sim.frames if frames is None else frames
         if not frames: return ""
 
@@ -310,9 +310,18 @@ class LC3UnitTestCase(unittest.TestCase):
             "",
             "Stack trace:"
         ]
-        lines.append("  " + self._formatFrame(frames[-1]))
-        for f in reversed(frames[:-1]):
-            lines.append("  from " + self._formatFrame(f))
+
+        n_frames = len(frames)
+        if n_frames == 1:
+            lines.append("  " + self._formatFrame(frames[0]))
+        else:
+            outer, *middle, inner = frames
+            lines.append("  " + self._formatFrame(inner))
+            for f in reversed(middle[-max_middle_frames:]):
+                lines.append("  from " + self._formatFrame(f))
+            if len(middle) > max_middle_frames:
+                lines.append(f"  [... {len(middle) - max_middle_frames} more frames ...]")
+            lines.append("  from " + self._formatFrame(outer))
         
         return "\n".join(lines)
 
