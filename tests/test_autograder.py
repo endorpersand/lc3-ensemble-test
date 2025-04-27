@@ -676,5 +676,42 @@ class TestLC3Sample(LC3UnitTestCase):
         with self.assertRaises(AssertionError):
             self.assertHalted()
 
+    def test_error_not_long_1(self):
+        self.loadCode(f"""
+            .orig x3000
+            LOOP: JSR LOOP
+            .end
+        """)
+
+        # Assert stack failure
+        self.runCode()
+        with self.assertRaises(AssertionError) as e:
+            self.assertHalted()
+        
+        # Check the number of lines is <20
+        self.assertLess(len(str(e.exception).splitlines()), 20, "Output has too many lines")
+
+    def test_error_not_long_2(self):
+        self.loadCode(f"""
+            .orig x3000
+            {'JSR SR\n' * 200}
+            HALT
+            
+            SR: RET
+            .end
+        """)
+        self.defineSubroutine("SR", ["n"])
+
+        self.runCode()
+        self.assertHalted()
+
+        # Assert SR call failure
+        with self.assertRaises(AssertionError) as e:
+            self.assertSubroutineCalled("SR", [1], directly_called=True)
+        
+        # Check the number of lines is <20
+        self.assertLess(len(str(e.exception).splitlines()), 20, "Output has too many lines")
+
+
 if __name__ == "__main__":
     unittest.main()
