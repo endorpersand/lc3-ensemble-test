@@ -72,6 +72,40 @@ def _format_maybe_string(s: list[int]) -> str:
     """
     return bytes(min(max(0, c), 255) for c in s).decode("ascii", errors="replace")
 
+def _format_list(input_lines: list[str], max_middle_lines: int = 8) -> list[str]:
+    """
+    Formats a list of text, omitting middle lines if necessary
+
+    Parameters
+    ----------
+    lines : list[str]
+        The lines
+    max_middle_lines : int, optional
+        The number of middle lines, by default 8
+    indent : int, optional
+        The size of indent, by default 2
+
+    Returns
+    -------
+    str
+        The output string
+    """
+    n_lines = len(input_lines)
+
+    if n_lines < 2:
+        return input_lines[:1]
+    
+    lines = []
+    first, *middle, last = input_lines
+
+    lines.append(first)
+    lines.extend(middle[:max_middle_lines])
+    if len(middle) > max_middle_lines:
+        lines.append(f"[... {len(middle) - max_middle_lines} more ...]")
+    lines.append(last)
+
+    return lines
+
 @dataclasses.dataclass
 class CallNode:
     frame_no: int
@@ -311,17 +345,14 @@ class LC3UnitTestCase(unittest.TestCase):
             "Stack trace:"
         ]
 
-        n_frames = len(frames)
-        if n_frames == 1:
-            lines.append("  " + self._formatFrame(frames[0]))
-        else:
-            outer, *middle, inner = frames
-            lines.append("  " + self._formatFrame(inner))
-            for f in reversed(middle[-max_middle_frames:]):
-                lines.append("  from " + self._formatFrame(f))
-            if len(middle) > max_middle_frames:
-                lines.append(f"  [... {len(middle) - max_middle_frames} more frames ...]")
-            lines.append("  from " + self._formatFrame(outer))
+        # Frames are saved in order of least depth to most depth.
+        # We want to view frames in the reversed order.
+        rframes = list(reversed(frames))
+        frame_lines = [
+            *(self._formatFrame(f) for f in rframes[:1]), # first frame
+            *(f"from {self._formatFrame(f)}" for f in rframes[1:]) # remaining frames
+        ]
+        lines.extend(f"  {fl}" for fl in _format_list(frame_lines))
         
         return "\n".join(lines)
 
@@ -1326,14 +1357,12 @@ class LC3UnitTestCase(unittest.TestCase):
         
         has_matching_call = any(correct_arguments(c) for c in naive_matching_calls)
         if not has_matching_call:
+            call_list = _format_list([_format_call(label, c.args) for c in naive_matching_calls])
             msg = "\n".join([
                 _nonnull_or_default(msg_fmt, "{} called {}, but not with the expected arguments").format(caller_name, repr(label)),
                 f"expected: {_format_call(label, args)}",
                 f"all {label!r} calls:",
-                *(
-                    " " * 4 + _format_call(label, c.args) for c in naive_matching_calls
-                )
-
+                *(f"  {c}" for c in call_list)
             ])
             self.fail(msg)
 
