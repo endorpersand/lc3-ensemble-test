@@ -1144,27 +1144,29 @@ class LC3UnitTestCase(unittest.TestCase):
         ----------
         init_sp : int, optional
             The initial value of the stack pointer to check against.
-            This must be provided if this is a self.runCode execution,
-            and can be optionally provided if this is a self.callSubroutine execution.
+            This must be provided if this is a self.runCode execution 
+            (since R6 would likely be initialized during program execution).
+            This can optionally be provided if this is a self.callSubroutine execution.
         
         Raises
         ------
         InternalArgError
             If `init_sp` is not provided on a self.runCode execution
         """
-        if self.saved_registers is None:
+        if self.exec_props is None:
             raise InternalArgError("no execution to assert stack management on")
 
         if isinstance(self.exec_props, _ExecRunCode):
             caller_name = "program"
             if init_sp is None:
                 raise InternalArgError("assertStackCorrect was called on a self.runCode subroutine without a init_sp parameter")
+            orig_sp = _to_u16(init_sp)
         elif isinstance(self.exec_props, _ExecCallSubroutine):
             caller_name = f"subroutine {self.exec_props.label!r}"
+            orig_sp = _to_u16(self.exec_props.R6)
         else:
             raise InternalArgError(f"Unknown execution type {type(self.exec_props).__name__!r}")
 
-        orig_sp  = _to_u16(init_sp or self.saved_registers[6])
         final_sp = _to_u16(self.sim.r6)
 
         # This should check for overflow, 
@@ -1198,7 +1200,8 @@ class LC3UnitTestCase(unittest.TestCase):
             )
 
         if not self.sim.hit_halt():
-            msg = _nonnull_or_default(msg, "Program did not halt correctly") + self._formatFrameStack()
+            msg = _nonnull_or_default(msg, f"Program did not halt after {self.exec_props.max_instrs_run} instructions") \
+                + self._formatFrameStack()
             self.fail(msg)
     
     def assertReturned(self, msg: Optional[str] = None):
@@ -1221,9 +1224,12 @@ class LC3UnitTestCase(unittest.TestCase):
                 "If you meant to check if the subroutine halted, use self.assertHalted."
             )
         
-        msg = _nonnull_or_default(msg, "Subroutine did not return correctly") + self._formatFrameStack()
+        msg = _nonnull_or_default(msg, f"Subroutine did not return after {self.exec_props.max_instrs_run} instructions") \
+            + self._formatFrameStack()
+        
         self.longMessage = False
-        self.assertPC(self.sim.r7, msg)
+        self.assertPC(self.sim.r7, msg) # assert return was correct
+        self.assertReg(7, self.exec_props.PC, "Return address (R7) was not correct when returning")
         self.longMessage = True
     
     def assertReturnValue(self, expected: int, msg: Optional[str] = None):

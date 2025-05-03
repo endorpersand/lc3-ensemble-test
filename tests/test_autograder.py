@@ -712,6 +712,39 @@ class TestLC3Sample(LC3UnitTestCase):
         # Check the number of lines is <20
         self.assertLess(len(str(e.exception).splitlines()), 20, "Output has too many lines")
 
+    def test_assert_returned_fail(self):
+        self.loadCode(f"""
+        .orig x3000
+            JSR SR
+            HALT
+            
+            {_subroutine('SR', '''
+                AND R0, R0, #0
+                THIS: BR THIS
+            ''')}
+        .end
+        """)
 
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+        with self.assertRaises(AssertionError, msg="assertReturned() should have failed, as it is stuck in loop"):
+            self.assertReturned()
+
+        self.loadCode(f"""
+        .orig x3000
+            JSR SR
+            HALT
+            
+            {_subroutine('SR', '''
+                AND R0, R0, #0
+                STR R0, R5, #2 ; overwrite R7
+            ''')}
+        .end
+        """)
+
+        self.defineSubroutine("SR", [])
+        self.callSubroutine("SR", [])
+        with self.assertRaises(AssertionError, msg="assertReturned() should have failed, as it did not return to correct R7"):
+            self.assertReturned()
 if __name__ == "__main__":
     unittest.main()
