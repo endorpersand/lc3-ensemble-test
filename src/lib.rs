@@ -683,11 +683,10 @@ impl PySimulator {
     /// The I/O output.
     #[getter]
     fn get_output(&self) -> String {
-        String::from_utf8_lossy({
-            &self.output.get_buffer()
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-        }).into_owned()
+        let buf = self.output.get_buffer().read()
+            .unwrap_or_else(|e| e.into_inner());
+
+        String::from_utf8_lossy(&buf).into_owned()
     }
     #[setter]
     fn set_output(&mut self, output: &str) {
