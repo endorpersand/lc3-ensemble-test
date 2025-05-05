@@ -277,7 +277,7 @@ class LC3UnitTestCase(unittest.TestCase):
         The range starts at `start_addr` and reads up to `length` elements (if length is `None`, it reads forever).
         """
         ctr = itertools.count() if length is None else range(length)
-        return (self.sim.read_mem(_to_u16(start_addr + i)) for i in ctr)
+        return (self.sim.read_mem(_to_u16(start_addr + i), track_access=False) for i in ctr)
     
     def _writeContiguous(self, start_addr: int, words: "Iterable[int]"):
         """
@@ -286,7 +286,7 @@ class LC3UnitTestCase(unittest.TestCase):
         The range starts at `start_addr` and writes until the iterable is depleted.
         """
         for i, word in enumerate(words):
-            self.sim.write_mem(start_addr + i, _to_u16(word))
+            self.sim.write_mem(start_addr + i, _to_u16(word), track_access=False)
 
     def _lookup(self, label: str) -> int:
         """
@@ -522,7 +522,7 @@ class LC3UnitTestCase(unittest.TestCase):
             Value at the memory location.
         """
         addr = self._resolveAddr(loc)
-        return _LocatedInt(self.sim.read_mem(addr), origin=_IOriginIndirect(loc, 0))
+        return _LocatedInt(self.sim.read_mem(addr, track_access=False), origin=_IOriginIndirect(loc, 0))
     
     def getReg(self, reg_no: int) -> int:
         """
@@ -553,7 +553,7 @@ class LC3UnitTestCase(unittest.TestCase):
             Value to write.
         """
         addr = self._resolveAddr(loc)
-        self.sim.write_mem(addr, _to_u16(value))
+        self.sim.write_mem(addr, _to_u16(value), track_access=False)
     
     def writeArray(self, loc: MemLocation, lst: "list[int]"):
         """
@@ -585,7 +585,7 @@ class LC3UnitTestCase(unittest.TestCase):
         string_bytes = _verify_ascii_string(string, arg_desc=f"string value parameter ({string=!r})")
 
         self._writeContiguous(addr, string_bytes)
-        self.sim.write_mem(addr + len(string_bytes), 0)
+        self.sim.write_mem(addr + len(string_bytes), 0, track_access=False)
 
     def setReg(self, reg_no: int, value: int):
         """
@@ -829,7 +829,8 @@ class LC3UnitTestCase(unittest.TestCase):
             raise NotImplementedError(f"callSubroutine: unimplemented subroutine type {type(defn)}")
         
         self.sim.pc = PC
-        self.sim.write_mem(PC, self.sim.read_mem(PC)) # initialize this location so that it doesn't crash when calling in strict mode
+        # initialize this location so that it doesn't crash when calling in strict mode
+        self.sim.write_mem(PC, self.sim.read_mem(PC, track_access=False), track_access=False)
 
         self.exec_props = _ExecCallSubroutine(label, args, R6, PC, max_instrs_run)
         self.call_trace_list = None
@@ -889,7 +890,7 @@ class LC3UnitTestCase(unittest.TestCase):
             {0} can be used in the message format to display the label of the value.
         """
         addr = self._resolveAddr(loc)
-        actual = self.sim.read_mem(addr)
+        actual = self.sim.read_mem(addr, track_access=False)
 
         msg = _nonnull_or_default(msg_fmt, "Incorrect value for mem[{}]").format(_get_loc_name(loc))
         self._assertShortEqual(expected, actual, msg)
@@ -1475,3 +1476,142 @@ class LC3UnitTestCase(unittest.TestCase):
                     f"{missing_str} should have been called."
                 )
                 self.fail(msg)
+    
+    def assertMemAccess(self, 
+        loc: MemLocation,
+        length: int = 1, *,
+        accessed: Optional[bool] = None,
+        read: Optional[bool] = None,
+        written: Optional[bool] = None
+    ):
+        """
+        Asserts that a given memory location or range of memory locations has
+        a specified pattern of accesses.
+
+        ---
+
+        There are two main ways of using this function:
+        1. To assert that any access occurs (or doesn't occur)
+        2. To assert that a specific type of access occurs (or doesn't occur)
+
+        For (1), you specify whether you expect an access to occur or not
+        (`accessed = True`, `accessed = False`). 
+        
+        For (2), you specify which
+        types of accesses you expect to occur or not
+        (`read = True`, `write = True`, `read = False`, `write = False`).
+
+        If the specific flag is omitted, then that flag isn't asserted for at all.
+
+        ---
+
+        The options can be described as the following:
+
+        | Action                    | Parameters                                  |
+        |---------------------------|---------------------------------------------|
+        | Assert some access occurs | `self.assertMemAccess(loc, accessed=True)`  |
+        | Assert no access occurs   | `self.assertMemAccess(loc, accessed=False)` |
+
+        | Action                                        |R|W| Parameters                                                                               |
+        |-----------------------------------------------|-|-|------------------------------------------------------------------------------------------|
+        | Assert a read occurs                          |✅|🆗| `self.assertMemAccess(loc, read=True)`                                                 |
+        | Assert a write occurs                         |🆗|✅| `self.assertMemAccess(loc, write=True)`                                                |
+        | Assert a read does not occur                  |❌|🆗| `self.assertMemAccess(loc, read=False)`                                                |
+        | Assert a write does not occur                 |🆗|❌| `self.assertMemAccess(loc, write=False)`                                               |
+        | Assert both a read and write do not occur     |❌|❌| `self.assertMemAccess(loc, read=False, write=False)` (equivalent to `accessed = False`)|
+        | Assert a read occurs and a write does not     |✅|❌| `self.assertMemAccess(loc, read=True, write=False)`                                    |
+        | Assert a read does not occur and a write does |❌|✅| `self.assertMemAccess(loc, read=False, write=True)`                                    |
+        | Assert both a read and write occur            |✅|✅| `self.assertMemAccess(loc, read=True, write=True)`                                     |
+
+        ---
+
+        You may also specify a range of memory locations rather than a single memory location.
+        The effect of this is that it will assert that a given access occurs at some point within the range.
+
+        This is useful for asserting an access occurs at all in an array.
+
+        To specify a range, use the `length` parameter to expand the number of memory locations this access applies to:
+
+        ```py
+        # Assert a read occurs somewhere in this 20-element array
+        self.assertMemAccess("ARRAY", length=20, read=True)
+        ```
+
+        Note that this only asserts that an access occurs once on this array.
+        If you wish to assert an access on every element in the array, 
+        then simply iterate and assert through each element of the array.
+
+        Parameters
+        ----------
+        loc : MemLocation
+            The starting location to assert memory access.
+        length : int, optional
+            The length to assert over.
+            This is by default 1 (i.e., asserting that the one memory location meets the access guards).
+            This can be increased to assert that an access guard occurs in some range of memory locations.
+        accessed : Optional[bool], optional
+            - If True, this function asserts that the memory location was accessed during execution.
+            - If False, this function asserts that the memory location was **not** accessed during execution.
+            - If None (or unspecified), this function does not assert anything about accesses 
+                (unless qualified by the `read` and `written` parameters).
+        read : Optional[bool], optional
+            - If True, this function asserts that the memory location was read during execution.
+            - If False, this function asserts that the memory location was **not** read during execution.
+            - If None (or unspecified), this function does not assert anything about reads.
+        written : Optional[bool], optional
+            - If True, this function asserts that the memory location was written during execution.
+            - If False, this function asserts that the memory location was **not** written during execution.
+            - If None (or unspecified), this function does not assert anything about writes.
+
+        Raises
+        ------
+        InternalArgError
+            If the provided access guards create an invalid/impossible situation.
+        """
+        # Check guards make sense
+        if accessed is not None:
+            if accessed and (read == False and written == False):
+                raise InternalArgError("self.assertMemAccess can never succeed: it requires an access, but prohibits all reads and writes")
+            if not accessed and (read == True or written == True):
+                raise InternalArgError("self.assertMemAccess can never succeed: it prohibits access, but requires a read or write")
+        
+        if length < 0: return
+
+        if length == 1:
+            item = f"mem[{_get_loc_name(loc)}]"
+        elif isinstance(loc, str):
+            item = f"range mem[{_get_loc_name(loc)}]..mem[{_get_loc_name(loc)} + {length - 1}]"
+        else:
+            item = f"range mem[{_get_loc_name(loc)}]..mem[{_get_loc_name(loc + length - 1)}]"
+
+        actual_read = False
+        actual_written = False
+        
+        start_addr = self._resolveAddr(loc)
+        # Keep track of accesses within this range
+        for addr in range(start_addr, start_addr + length):
+            accesses = self.sim.get_mem_accesses(addr)
+            actual_read |= accesses.read
+            actual_written |= accesses.written
+        
+        actual_accessed = actual_read | actual_written
+
+        # Assert read
+        if read is not None:
+            if read and not actual_read:
+                self.fail(f"Expected {item} to be read from during execution")
+            if not read and actual_read:
+                self.fail(f"Did not expect {item} to be read from during execution")
+
+        # Assert write
+        if written is not None:
+            if written and not actual_written:
+                self.fail(f"Expected {item} to be written to during execution")
+            if not written and actual_written:
+                self.fail(f"Did not expect {item} to be written to during execution")
+        
+        if accessed is not None:
+            if accessed and not actual_accessed:
+                self.fail(f"Expected {item} to be accessed during execution")
+            if not accessed and actual_accessed:
+                self.fail(f"Did not expect {item} to be accessed during execution")

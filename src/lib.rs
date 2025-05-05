@@ -8,6 +8,7 @@ use lc3_ensemble::sim::debug::Breakpoint;
 use lc3_ensemble::sim::device::{BufferedDisplay, BufferedKeyboard, Interrupt, InterruptFromFn};
 use lc3_ensemble::sim::frame::{Frame, ParameterList};
 use lc3_ensemble::sim::mem::{MachineInitStrategy, Word};
+use lc3_ensemble::sim::observer::AccessSet;
 use lc3_ensemble::sim::{MemAccessCtx, SimErr, SimFlags, Simulator};
 use pyo3::types::PyInt;
 use pyo3::{create_exception, prelude::*};
@@ -251,6 +252,31 @@ impl PyFrame {
     }
 }
 
+#[repr(transparent)]
+#[pyclass(name="AccessSet", module="ensemble_test")]
+struct PyAccessSet(AccessSet);
+
+#[pymethods]
+impl PyAccessSet {
+    #[getter]
+    fn get_accessed(&self) -> bool { self.0.accessed() }
+    #[getter]
+    fn get_read(&self) -> bool { self.0.read() }
+    #[getter]
+    fn get_written(&self) -> bool { self.0.written() }
+    #[getter]
+    fn get_modified(&self) -> bool { self.0.modified() }
+    
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.0)
+    }
+}
+impl From<AccessSet> for PyAccessSet {
+    fn from(value: AccessSet) -> Self {
+        Self(value)
+    }
+}
+
 /// The simulator!
 #[pyclass(name="Simulator", module="ensemble_test")]
 struct PySimulator {
@@ -418,7 +444,8 @@ impl PySimulator {
         addr,
         *,
         privileged = true,
-        strict = false
+        strict = false,
+        track_access = true
     ))]
     /// Reads a value from memory, triggering any I/O devices if applicable.
     /// 
@@ -426,11 +453,11 @@ impl PySimulator {
     /// 
     /// This function also accepts optional `privileged` and `strict` parameters.
     /// These designate whether to read memory in privileged mode and with strict memory access.
-    fn read_mem(&mut self, addr: u16, privileged: bool, strict: bool) -> PyResult<u16> {
+    fn read_mem(&mut self, addr: u16, privileged: bool, strict: bool, track_access: bool) -> PyResult<u16> {
         // Note: technically lc3-ensemble does accept non-effectful IO reads (vvvvvvvvvvvvvvvv)
         // but it's not reaaally necessary for AG, so I am leaving it off of
         // the Python binding unless something goes wrong down the line
-        let word = self.sim.read_mem(addr, MemAccessCtx { privileged, strict, io_effects: true })
+        let word = self.sim.read_mem(addr, MemAccessCtx { privileged, strict, io_effects: true, track_access })
             .map_err(|e| SimError::from_lc3_err(e, self.sim.prefetch_pc()))?;
 
         Ok(word.get())
@@ -440,7 +467,8 @@ impl PySimulator {
         val,
         *,
         privileged = true,
-        strict = false
+        strict = false,
+        track_access = true
     ))]
 
     /// Writes a value to memory, triggering any I/O devices if applicable.
@@ -449,8 +477,8 @@ impl PySimulator {
     /// 
     /// This function also accepts optional `privileged` and `strict` parameters.
     /// These designate whether to write memory in privileged mode and with strict memory access.
-    fn write_mem(&mut self, addr: u16, val: u16, privileged: bool, strict: bool) -> PyResult<()> {
-        self.sim.write_mem(addr, Word::new_init(val), MemAccessCtx { privileged, strict, io_effects: true })
+    fn write_mem(&mut self, addr: u16, val: u16, privileged: bool, strict: bool, track_access: bool) -> PyResult<()> {
+        self.sim.write_mem(addr, Word::new_init(val), MemAccessCtx { privileged, strict, io_effects: true, track_access })
             .map_err(|e| SimError::from_lc3_err(e, self.sim.prefetch_pc()))
     }
 
@@ -467,6 +495,15 @@ impl PySimulator {
     /// If you wish to trigger I/O devices, use `write_mem`.
     fn set_mem(&mut self, addr: u16, val: u16) {
         self.sim.mem[addr].set(val);
+    }
+
+    /// Obtains all tracked accesses to a given memory address since last clear.
+    fn get_mem_accesses(&self, addr: u16) -> PyAccessSet {
+        self.sim.observer.get_mem_accesses(addr).into()
+    }
+    /// Clears all tracked memory accesses.
+    fn clear_mem_accesses(&mut self) {
+        self.sim.observer.clear();
     }
 
     /// The value of register 0.

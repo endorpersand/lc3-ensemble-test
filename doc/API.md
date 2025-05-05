@@ -377,6 +377,59 @@ self.assertSubroutinesCalledInOrder([
 
 This method can only be called after an execution. Additionally, the subroutine arguments must point to a subroutine defined using `self.defineSubroutine`.
 
+### autograder.LC3UnitTestCase.assertMemAccess(loc: int | str, length: int = 1, *, ...)
+
+Asserts that a given memory location or range of memory locations has
+a specified pattern of accesses.
+
+There are two main ways of using this function:
+
+1. To assert that any access occurs (or doesn't occur)
+2. To assert that a specific type of access occurs (or doesn't occur)
+
+For (1), you specify whether you expect an access to occur or not
+(`accessed = True`, `accessed = False`).
+
+For (2), you specify which
+types of accesses you expect to occur or not
+(`read = True`, `write = True`, `read = False`, `write = False`).
+
+If the specific flag is omitted, then that flag isn't asserted for at all.
+
+The options can be described as the following:
+
+| Action                    | Parameters                                  |
+|---------------------------|---------------------------------------------|
+| Assert some access occurs | `self.assertMemAccess(loc, accessed=True)`  |
+| Assert no access occurs   | `self.assertMemAccess(loc, accessed=False)` |
+
+| Action                                        |R|W| Parameters                                                                               |
+|-----------------------------------------------|-|-|------------------------------------------------------------------------------------------|
+| Assert a read occurs                          |✅|🆗| `self.assertMemAccess(loc, read=True)`                                                 |
+| Assert a write occurs                         |🆗|✅| `self.assertMemAccess(loc, write=True)`                                                |
+| Assert a read does not occur                  |❌|🆗| `self.assertMemAccess(loc, read=False)`                                                |
+| Assert a write does not occur                 |🆗|❌| `self.assertMemAccess(loc, write=False)`                                               |
+| Assert both a read and write do not occur     |❌|❌| `self.assertMemAccess(loc, read=False, write=False)` (equivalent to `accessed = False`)|
+| Assert a read occurs and a write does not     |✅|❌| `self.assertMemAccess(loc, read=True, write=False)`                                    |
+| Assert a read does not occur and a write does |❌|✅| `self.assertMemAccess(loc, read=False, write=True)`                                    |
+| Assert both a read and write occur            |✅|✅| `self.assertMemAccess(loc, read=True, write=True)`                                     |
+
+---
+
+You may also specify a range of memory locations rather than a single memory location.
+The effect of this is that it will assert that a given access occurs at some point within the range.
+
+This is useful for asserting an access occurs at all in an array.
+
+To specify a range, use the `length` parameter to expand the number of memory locations this access applies to:
+
+```py
+# Assert a read occurs somewhere in this 20-element array
+self.assertMemAccess("ARRAY", length=20, read=True)
+```
+
+Note that this only asserts that an access occurs once on this array. If you wish to assert an access on every element in the array, then simply iterate and assert through each element of the array.
+
 ## Internal
 
 While not recommended, the autograder can also access the simulator and call methods on the simulator.
@@ -404,6 +457,14 @@ Gets the memory value at a given address without triggering I/O side effects.
 ### core.Simulator.set_mem(addr: int, val: int)
 
 Sets the memory value at a given address without triggering I/O side effects.
+
+### core.Simulator.get_mem_accesses(addr: int)
+
+Gets all accesses which have occurred at the given memory address.
+
+### core.Simulator.clear_mem_accesses()
+
+Clears the Simulator's store of memory accesses.
 
 ### core.Simulator.{r0, r1, r2, r3, r4, r5, r6, r7} (properties)
 
@@ -438,6 +499,10 @@ Readonly properties holding whether each condition code is true or not.
 ### core.Simulator.pc (property)
 
 Property holding the current value of the PC.
+
+### core.Simulator.instructions_run (readonly property)
+
+The number of instructions ran, starting from the beginning of the program.
 
 ### core.Simulator.use_real_halt (property)
 

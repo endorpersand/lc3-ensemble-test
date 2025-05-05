@@ -746,5 +746,131 @@ class TestLC3Sample(LC3UnitTestCase):
         self.callSubroutine("SR", [])
         with self.assertRaises(AssertionError, msg="assertReturned() should have failed, as it did not return to correct R7"):
             self.assertReturned()
+    
+    def test_access_read(self):
+        self.loadCode(f"""
+        .orig x3000
+            LD R1, LABEL_D
+            LDI R2, LABEL_I
+            LEA R3, LABEL_R
+            LDR R3, R3, #0
+            LEA R4, LABEL_L
+            HALT
+            
+            LABEL_D  .fill x1111
+            LABEL_I  .fill LABEL_I2
+            LABEL_I2 .fill x2222
+            LABEL_R  .fill x3333
+            LABEL_L  .fill x4444
+            LABEL_X  .fill x5555
+        .end
+        """)
+
+        self.runCode()
+        self.assertReg(1, 0x1111)
+        self.assertReg(2, 0x2222)
+        self.assertReg(3, 0x3333)
+        self.assertReg(4, 0x300A)
+
+        self.assertMemAccess("LABEL_D", read=True)
+        self.assertMemAccess("LABEL_I", read=True)
+        self.assertMemAccess("LABEL_I2", read=True)
+        self.assertMemAccess("LABEL_R", read=True)
+        self.assertMemAccess("LABEL_L", read=False)
+        self.assertMemAccess("LABEL_X", read=False)
+        
+    
+    def test_access_write(self):
+        self.loadCode(f"""
+        .orig x3000
+            ST R1, LABEL_D
+            STI R2, LABEL_I
+            LEA R3, LABEL_R
+            STR R3, R3, #0
+            HALT
+            
+            LABEL_D  .fill x1111
+            LABEL_I  .fill LABEL_I2
+            LABEL_I2 .fill x2222
+            LABEL_R  .fill x3333
+            LABEL_X  .fill x4444
+        .end
+        """)
+
+        self.runCode()
+        self.assertMemAccess("LABEL_D",  written=True)
+        self.assertMemAccess("LABEL_I",  read=True)
+        self.assertMemAccess("LABEL_I2", written=True)
+        self.assertMemAccess("LABEL_R",  written=True)
+        self.assertMemAccess("LABEL_X",  written=False)
+    
+    def test_access_any(self):
+        self.loadCode(f"""
+        .orig x3000
+            LD R1, LABEL_A
+            ST R1, LABEL_B
+            HALT
+            
+            LABEL_A .fill x1234
+            LABEL_B .fill x1234
+            LABEL_C .fill x5678
+        .end
+        """)
+
+        self.runCode()
+        self.assertMemValue("LABEL_A", 0x1234)
+        self.assertMemValue("LABEL_B", 0x1234)
+        self.assertMemValue("LABEL_C", 0x5678)
+
+        self.assertMemAccess("LABEL_A", accessed=True)
+        self.assertMemAccess("LABEL_B", accessed=True)
+        self.assertMemAccess("LABEL_C", read=False)
+
+    def test_access_range(self):
+        self.loadCode("""
+        .orig x3000
+            LEA R0, S
+            LDR R1, R0, #1
+            LEA R2, T
+            STR R1, R2, #1
+            HALT
+            
+            S .stringz "abc"
+            T .stringz "def"
+            U .stringz "ghi"
+        .end
+        """)
+
+        self.runCode()
+        self.assertMemAccess("S", length=4, accessed=True)
+        self.assertMemAccess("S", length=4, read=True)
+        self.assertMemAccess("T", length=4, accessed=True)
+        self.assertMemAccess("T", length=4, written=True)
+        self.assertMemAccess("U", length=4, accessed=False)
+
+    def test_access_prohibited(self):
+        self.loadCode(f"""
+        .orig x3000
+            LD R1, LABEL_A
+            ST R1, LABEL_A
+            HALT
+            
+            LABEL_A .fill x1234
+        .end
+        """)
+
+        self.runCode()
+
+        with self.assertRaises(InternalArgError) as e:
+            self.assertMemAccess("LABEL_A", accessed=True, read=False, written=False)
+        self.assertIn("can never succeed", str(e.exception))
+
+        with self.assertRaises(InternalArgError) as e:
+            self.assertMemAccess("LABEL_A", accessed=False, read=False, written=True)
+        self.assertIn("can never succeed", str(e.exception))
+
+        self.assertMemAccess("LABEL_A", accessed=True, read=True, written=True)
+
+        
 if __name__ == "__main__":
     unittest.main()

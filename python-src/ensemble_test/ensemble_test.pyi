@@ -28,11 +28,14 @@ class Simulator:
     def _run_until_frame_change(self, stop: int | None = None) -> None: pass
 
     # Memory access
-    def read_mem(self, addr: int, *, privileged: bool = True, strict: bool = False) -> int: pass
-    def write_mem(self, addr: int, val: int, *, privileged: bool = True, strict: bool = False) -> None: pass
+    def read_mem(self, addr: int, *, privileged: bool = True, strict: bool = False, track_access: bool = True) -> int: pass
+    def write_mem(self, addr: int, val: int, *, privileged: bool = True, strict: bool = False, track_access: bool = True) -> None: pass
     def get_mem(self, addr: int) -> int: pass
     def set_mem(self, addr: int, val: int) -> None: pass
 
+    def get_mem_accesses(self, addr: int) -> AccessSet: pass
+    def clear_mem_accesses(self): pass
+    
     # Register access
     @property
     def r0(self) -> int: pass
@@ -133,19 +136,6 @@ class Simulator:
     def hit_halt(self) -> bool: pass
     def hit_breakpoint(self) -> bool: pass
     
-    # from pylc3
-    # TODO: determine if these are  necessary
-    # @property
-    # def max_call_stack_size(self) -> int: pass
-    # @max_call_stack_size.setter
-    # def max_call_stack_size(self, size: int) -> None: pass
-
-    # def disassemble(self, addr: int, level: int) -> str: pass
-    # def disassemble_data(self, addr: int, level: int) -> str: pass
-    
-    # def first_level_calls(self) -> list[None]: pass
-    # def first_level_traps(self) -> list[None]: pass
-
 class LoadError(ValueError):
     pass
 class SimError(ValueError):
@@ -166,6 +156,16 @@ class Frame:
     @property
     def arguments(self) -> list[tuple[int, bool]]: pass
     pass
+
+class AccessSet:
+    @property
+    def accessed(self) -> bool: pass
+    @property
+    def read(self) -> bool: pass
+    @property
+    def written(self) -> bool: pass
+    @property
+    def modified(self) -> bool: pass
 
 class CallingConventionSRDef:
     params: list[str]
