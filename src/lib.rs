@@ -89,7 +89,7 @@ enum MemLocation {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[pyclass(module="ensemble_test", eq, eq_int)]
+#[pyclass(module="ensemble_test", eq, eq_int, from_py_object)]
 /// Strategies to fill the memory on initializing the simulator.
 enum MemoryFillType {
     /// Fill the memory with random values.
@@ -110,12 +110,13 @@ impl<'py> IntoPyObject<'py> for RegWrapper {
         self.0.reg_no().into_pyobject(py)
     }
 }
-impl<'py> FromPyObject<'py> for RegWrapper {
-    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+impl<'py> FromPyObject<'_, 'py> for RegWrapper {
+    type Error = PyErr;
+    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         ob.extract::<u8>().ok()
             .and_then(|i| Reg::try_from(i).ok())
             .map(RegWrapper)
-            .ok_or_else(|| PyIndexError::new_err(format!("register {ob} out of bounds")))
+            .ok_or_else(|| PyIndexError::new_err(format!("register {} out of bounds", *ob)))
     }
 }
 impl std::fmt::Debug for RegWrapper {
@@ -124,7 +125,7 @@ impl std::fmt::Debug for RegWrapper {
     }
 }
 #[derive(Clone)]
-#[pyclass(module="ensemble_test")]
+#[pyclass(module="ensemble_test", from_py_object)]
 /// Subroutine definition based on standard LC-3 calling convention.
 struct CallingConventionSRDef {
     /// A list of parameter names.
@@ -143,7 +144,7 @@ impl CallingConventionSRDef {
     }
 }
 #[derive(Clone)]
-#[pyclass(module="ensemble_test")]
+#[pyclass(module="ensemble_test", from_py_object)]
 /// Subroutine definition based on pass-by-register calling convention.
 struct PassByRegisterSRDef {
     /// A list of parameter names and associated register per parameter.
@@ -191,8 +192,9 @@ impl<'py> IntoPyObject<'py> for PyParamListWrapper {
         }
     }
 }
-impl<'py> FromPyObject<'py> for PyParamListWrapper {
-    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+impl<'py> FromPyObject<'_, 'py> for PyParamListWrapper {
+    type Error = PyErr;
+    fn extract(ob: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         if let Ok(CallingConventionSRDef { params }) = ob.extract() {
             Ok(Self(ParameterList::CallingConvention { params }))
         } else if let Ok(PassByRegisterSRDef { params, ret }) = ob.extract() {
@@ -324,7 +326,7 @@ impl PySimulator {
         this.sim.device_handler.set_display(this.output.clone());
 
         let int_handler = InterruptFromFn::new(|| {
-            Python::with_gil(|py| py.check_signals())
+            Python::attach(|py| py.check_signals())
                 .err()
                 .map(Interrupt::external)
         });
