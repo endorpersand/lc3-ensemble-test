@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "lc3-ensemble-test"
 description = "Python backend and autograder library for LC-3 assembly"
 license = "MIT"
+readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Rust",
